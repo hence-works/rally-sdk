@@ -1,0 +1,547 @@
+/**
+ * Reading a launch and trading it.
+ *
+ * Two things make this different from quoting a plain AMM, and both feed the slippage
+ * bound rather than being cosmetic:
+ *
+ *   - the anti-snipe curve fee decays 25% → 1% over the launch window, so a quote is
+ *     only valid for the fee at execution time; and
+ *   - a buy large enough to bond `b` to `B` **graduates the launch mid-swap** and pays
+ *     its remainder against a CLMM pool that did not exist when we quoted it.
+ *
+ * So a non-crossing curve trade is priced exactly (the math here mirrors
+ * `LaunchCurve`) and gets a tight band, while a crossing buy or a graduated pool is an
+ * approximation and gets a wider one. `TradeQuote.exact` says which you got.
+ */
+import { encodeFunctionData, type Address, type Hex } from "viem";
+import { readContract } from "viem/actions";
+import { erc20Abi, rallyHookAbi, rallyRouterAbi, uniswapV3PoolAbi } from "./abis";
+import { RallyError } from "./errors";
+import { poolIdFor, poolKeyFor, sortCurrencies, V4, type PoolKey } from "./pool";
+import {
+  curveFeeBps,
+  initCurve,
+  previewBuy,
+  previewBuyExactOut,
+  previewSell,
+  previewSellExactOut,
+  pricePerTokenWad,
+  scaleFor,
+  type Curve,
+} from "./curve";
+import type {
+  CurveParams,
+  LaunchState,
+  Phase,
+  PublicClientLike,
+  QuoteConfig,
+  RallyAddresses,
+  TradeQuote,
+  TradeSide,
+  TxRequest,
+} from "./types";
+
+const BPS = 10_000n;
+const PHASES: Phase[] = ["NONE", "CURVE", "GRADUATED"];
+
+/**
+ * 1% — the estimate came from an exact curve preview, so this only absorbs the fee
+ * decay and other traders moving `b` between quote and inclusion.
+ */
+export const EXACT_SLIPPAGE_BPS = 100n;
+/**
+ * 5% — the estimate is approximate: a graduation-crossing buy, or a graduated pool
+ * priced off `poolPriceWad`, which models no CLMM slippage at all. A tight bound there
+ * reverts honest trades.
+ */
+export const APPROX_SLIPPAGE_BPS = 500n;
+
+export function toleranceFor(exact: boolean): bigint {
+  return exact ? EXACT_SLIPPAGE_BPS : APPROX_SLIPPAGE_BPS;
+}
+
+/** Apply a bps tolerance to an estimate. Returns 0 when there is nothing to bound. */
+export function applySlippage(estimate: bigint, bps: bigint): bigint {
+  if (estimate <= 0n || bps >= BPS) return 0n;
+  return (estimate * (BPS - bps)) / BPS;
+}
+
+/** A deadline `secondsFromNow` ahead of now, for the router's `deadline` argument. */
+export function swapDeadline(secondsFromNow = 600): bigint {
+  return BigInt(Math.floor(Date.now() / 1000) + secondsFromNow);
+}
+
+/**
+ * Find which allowlisted quote a token launched against, then read its full state.
+ *
+ * A third-party venue knows a token address, not a PoolId — and the PoolId depends on
+ * the quote. Rather than requiring an indexer round-trip, this derives the candidate
+ * PoolId locally for each known quote and asks the hook which one exists. With two
+ * allowlisted quotes that is two `eth_call`s and no external dependency.
+ */
+export async function resolveLaunch(
+  client: PublicClientLike,
+  addresses: RallyAddresses,
+  token: Address,
+  candidateQuotes: Address[],
+  quoteConfig: (quote: Address) => Promise<QuoteConfig>,
+): Promise<LaunchState> {
+  const candidates = candidateQuotes.map((quote) => ({
+    quote,
+    key: poolKeyFor(quote, token, addresses.launchHook),
+  }));
+  const phases = await Promise.all(
+    candidates.map(({ key }) =>
+      readContract(client, {
+        address: addresses.launchHook,
+        abi: rallyHookAbi,
+        functionName: "phaseOf",
+        args: [poolIdFor(key)],
+      }).catch(() => 0),
+    ),
+  );
+
+  const found = candidates.findIndex((_, i) => Number(phases[i]) !== 0);
+  if (found === -1) {
+    throw new RallyError(
+      "LAUNCH_NOT_FOUND",
+      `No Rally launch for ${token} against any known quote on chain ${addresses.chainId}. ` +
+        `Tried: ${candidateQuotes.join(", ")}. If it launched against a newer quote, add it ` +
+        `via \`quotes\` on createRallyClient.`,
+      { details: { token, candidateQuotes } },
+    );
+  }
+
+  const { quote: quoteAddress, key } = candidates[found]!;
+  const pid = poolIdFor(key);
+  const phase = PHASES[Number(phases[found])] ?? "NONE";
+
+  const [quote, bonded, gradThreshold, launchedAt, graduatedAt, poolPriceWad, reserves, feeSplit] =
+    await Promise.all([
+      quoteConfig(quoteAddress),
+      read(client, addresses.launchHook, "bonded", pid),
+      read(client, addresses.launchHook, "gradThreshold", pid),
+      read(client, addresses.launchHook, "launchedAt", pid),
+      read(client, addresses.launchHook, "graduatedAt", pid),
+      read(client, addresses.launchHook, "poolPriceWad", pid),
+      readContract(client, {
+        address: addresses.launchHook,
+        abi: rallyHookAbi,
+        functionName: "poolReserves",
+        args: [pid],
+      }),
+      readContract(client, {
+        address: addresses.launchHook,
+        abi: rallyHookAbi,
+        functionName: "feeConfigOf",
+        args: [pid],
+      }),
+    ]);
+
+  return {
+    token,
+    pid,
+    quote,
+    phase,
+    bonded: bonded as bigint,
+    gradThreshold: gradThreshold as bigint,
+    launchedAt: Number(launchedAt),
+    graduatedAt: Number(graduatedAt),
+    poolPriceWad: poolPriceWad as bigint,
+    reserves: { quote: reserves[0], token: reserves[1] },
+    feeSplit: {
+      creatorBps: feeSplit.creatorBps,
+      dividendBps: feeSplit.dividendBps,
+      buybackBps: feeSplit.buybackBps,
+      lpSupportBps: feeSplit.lpSupportBps,
+    },
+    quoteIsCurrency0: sortCurrencies(quoteAddress, token).quoteIsCurrency0,
+    poolKey: key,
+  };
+}
+
+function read(
+  client: PublicClientLike,
+  hook: Address,
+  functionName: "bonded" | "gradThreshold" | "launchedAt" | "graduatedAt" | "poolPriceWad",
+  pid: Hex,
+) {
+  return readContract(client, { address: hook, abi: rallyHookAbi, functionName, args: [pid] });
+}
+
+/** Rebuild the launch's curve from the registry params + its own `B`. */
+export function curveOf(launch: LaunchState, params: CurveParams): Curve | null {
+  return initCurve(params.totalSupply, params.curveAllocation, launch.gradThreshold);
+}
+
+export interface QuoteTradeParams {
+  side: TradeSide;
+  /** Exact-input amount, in the input leg's base units. */
+  amountIn: bigint;
+  /** Override the slippage tolerance in bps. Defaults to 1% exact / 5% approximate. */
+  slippageBps?: bigint;
+  /** Unix seconds to price the anti-snipe fee at. Defaults to now. */
+  atTime?: number;
+}
+
+/**
+ * Price a trade off the curve, with no RPC beyond the state already read.
+ *
+ * During CURVE this reproduces `LaunchCurve` exactly. Post-graduation the curve prices
+ * nothing, so the estimate is a straight line off `poolPriceWad` — it ignores CLMM
+ * slippage entirely, which is exactly why it is marked `exact: false` and bounded at
+ * the wider tolerance.
+ */
+export function quoteTrade(
+  launch: LaunchState,
+  params: CurveParams,
+  input: QuoteTradeParams,
+): TradeQuote {
+  const { side, amountIn } = input;
+  if (amountIn <= 0n) {
+    throw new RallyError("INVALID_AMOUNT", "amountIn must be greater than zero.");
+  }
+
+  const now = input.atTime ?? Math.floor(Date.now() / 1000);
+  const onCurve = launch.phase === "CURVE";
+  const curve = onCurve ? curveOf(launch, params) : null;
+  const feeBps = onCurve
+    ? curveFeeBps(
+        {
+          startBps: params.feeStartBps,
+          endBps: params.feeEndBps,
+          decay: params.feeDecaySeconds,
+        },
+        launch.launchedAt,
+        now,
+      )
+    : 0n;
+
+  let amountOut: bigint;
+  let feeQuote = 0n;
+  let crossesGraduation = false;
+  let exact = false;
+
+  if (curve) {
+    const preview =
+      side === "buy"
+        ? previewBuy(curve, launch.bonded, amountIn, feeBps, params.poolFeeBps)
+        : previewSell(curve, launch.bonded, amountIn, feeBps);
+    amountOut = preview.amountOut;
+    feeQuote = preview.feeQuote;
+    crossesGraduation = preview.crossesGraduation;
+    exact = !preview.crossesGraduation;
+  } else {
+    // Graduated: straight line off the last pool price.
+    const price = launch.poolPriceWad;
+    if (price <= 0n) {
+      throw new RallyError(
+        "NO_PRICE",
+        `No price available for ${launch.token} — the pool has graduated but reports a ` +
+          `zero price. Refusing to quote a trade that cannot be bounded.`,
+        { details: { token: launch.token, phase: launch.phase } },
+      );
+    }
+    const scale = scaleFor(launch.quote.decimals);
+    amountOut = side === "buy" ? (amountIn * scale) / price : (amountIn * price) / scale;
+  }
+
+  const priceWad = curve
+    ? pricePerTokenWad(curve, launch.bonded, scaleFor(launch.quote.decimals))
+    : launch.poolPriceWad;
+  const slippageBps = input.slippageBps ?? toleranceFor(exact);
+
+  return {
+    side,
+    amountIn,
+    amountOut,
+    minAmountOut: applySlippage(amountOut, slippageBps),
+    slippageBps,
+    feeBps,
+    feeQuote,
+    priceWad,
+    crossesGraduation,
+    exact,
+    phase: launch.phase,
+  };
+}
+
+/** Exact-output pricing: what `wantOut` will cost. Curve phase only. */
+export function quoteTradeExactOut(
+  launch: LaunchState,
+  params: CurveParams,
+  input: { side: TradeSide; amountOut: bigint; slippageBps?: bigint; atTime?: number },
+): { amountIn: bigint; maxAmountIn: bigint; feeQuote: bigint; crossesGraduation: boolean } {
+  const curve = launch.phase === "CURVE" ? curveOf(launch, params) : null;
+  if (!curve) {
+    throw new RallyError(
+      "UNSUPPORTED",
+      "Exact-output quoting is curve-phase only. A graduated pool needs a v4 quoter.",
+      { details: { phase: launch.phase } },
+    );
+  }
+  const now = input.atTime ?? Math.floor(Date.now() / 1000);
+  const feeBps = curveFeeBps(
+    { startBps: params.feeStartBps, endBps: params.feeEndBps, decay: params.feeDecaySeconds },
+    launch.launchedAt,
+    now,
+  );
+
+  const preview =
+    input.side === "buy"
+      ? previewBuyExactOut(curve, launch.bonded, input.amountOut, feeBps, params.poolFeeBps)
+      : previewSellExactOut(curve, launch.bonded, input.amountOut, feeBps);
+
+  if (!preview) {
+    throw new RallyError(
+      "INVALID_AMOUNT",
+      `Cannot withdraw ${input.amountOut} quote: it exceeds the curve's bonded reserve ` +
+        `(${launch.bonded}). On-chain this reverts ExactOutputExceedsReserve.`,
+      { details: { bonded: launch.bonded, wanted: input.amountOut } },
+    );
+  }
+
+  const slippageBps = input.slippageBps ?? toleranceFor(!preview.crossesGraduation);
+  return {
+    amountIn: preview.amountIn,
+    // Exact-out bounds the INPUT from above, so the tolerance widens rather than cuts.
+    maxAmountIn: (preview.amountIn * (BPS + slippageBps)) / BPS,
+    feeQuote: preview.feeQuote,
+    crossesGraduation: preview.crossesGraduation,
+  };
+}
+
+export interface PrepareSwapParams extends QuoteTradeParams {
+  /** The trader. Needed only to check the allowance for the input leg. */
+  trader?: Address;
+  /** Override the computed `amountLimit` (the router's slippage bound). */
+  minAmountOut?: bigint;
+  /** Unix-seconds deadline. Defaults to 10 minutes out. */
+  deadline?: bigint;
+  /**
+   * Fund a wETH-quoted buy with native ETH (`msg.value`, wrapped by the router and the
+   * remainder refunded) instead of a wETH allowance. Defaults to false — pass true
+   * when the trader holds ETH rather than wETH.
+   */
+  payWithEth?: boolean;
+  /**
+   * Deliver a wETH output leg as native ETH. Defaults to true for a sell into a
+   * wETH-quoted pool, which is what a user holding ETH expects.
+   */
+  unwrapOut?: boolean;
+  /** Approve `type(uint256).max` instead of the exact input. Default false. */
+  approveMax?: boolean;
+}
+
+export interface PreparedSwap {
+  quote: TradeQuote;
+  /** Present when the input leg needs an allowance to the router. */
+  approval?: TxRequest;
+  request: TxRequest;
+  poolKey: PoolKey;
+  zeroForOne: boolean;
+  deadline: bigint;
+}
+
+/**
+ * Build an unsigned swap through `RallyRouter.swap`.
+ *
+ * Trades route through the router — never `PoolManager` directly — because v4's own
+ * `Swap` event records only the router as `sender`; the router re-emits `RallySwap`
+ * with the real trader, which is what attributes the fill to a user downstream.
+ */
+export async function prepareSwap(
+  client: PublicClientLike,
+  addresses: RallyAddresses,
+  launch: LaunchState,
+  params: CurveParams,
+  input: PrepareSwapParams,
+): Promise<PreparedSwap> {
+  const quote = quoteTrade(launch, params, input);
+  const buy = input.side === "buy";
+  const inputToken = buy ? launch.quote.address : launch.token;
+  const payWithEth = Boolean(input.payWithEth) && buy && launch.quote.isNative;
+  const unwrapOut = input.unwrapOut ?? (!buy && launch.quote.isNative);
+
+  if (input.payWithEth && !launch.quote.isNative) {
+    throw new RallyError(
+      "INVALID_AMOUNT",
+      `payWithEth only works on a wETH-quoted launch. ${launch.token} is quoted in ` +
+        `${launch.quote.address} — use prepareEthBuy, which routes ETH through a v3 pool first.`,
+      { details: { quote: launch.quote.address } },
+    );
+  }
+
+  let approval: TxRequest | undefined;
+  if (!payWithEth) {
+    const trader = input.trader;
+    if (!trader) {
+      throw new RallyError(
+        "NO_ACCOUNT",
+        "Pass `trader` (or use a client with an account) so the input allowance can be checked.",
+      );
+    }
+    const allowance = await readContract(client, {
+      address: inputToken,
+      abi: erc20Abi,
+      functionName: "allowance",
+      args: [trader, addresses.rallyRouter],
+    });
+    if (allowance < input.amountIn) {
+      approval = {
+        to: inputToken,
+        data: encodeFunctionData({
+          abi: erc20Abi,
+          functionName: "approve",
+          args: [addresses.rallyRouter, input.approveMax ? (1n << 256n) - 1n : input.amountIn],
+        }),
+        value: 0n,
+        chainId: addresses.chainId,
+      };
+    }
+  }
+
+  // Buys spend the quote, sells spend the token — direction follows from which side
+  // the quote sorted onto.
+  const zeroForOne = buy ? launch.quoteIsCurrency0 : !launch.quoteIsCurrency0;
+  const deadline = input.deadline ?? swapDeadline();
+  const amountLimit = input.minAmountOut ?? quote.minAmountOut;
+
+  const data = encodeFunctionData({
+    abi: rallyRouterAbi,
+    functionName: "swap",
+    args: [
+      launch.poolKey,
+      {
+        zeroForOne,
+        // Negative = exact input, per v4's sign convention.
+        amountSpecified: -input.amountIn,
+        sqrtPriceLimitX96: zeroForOne ? V4.MIN_SQRT_RATIO + 1n : V4.MAX_SQRT_RATIO - 1n,
+      },
+      "0x",
+      unwrapOut,
+      amountLimit,
+      deadline,
+    ],
+  });
+
+  return {
+    quote,
+    approval,
+    request: {
+      to: addresses.rallyRouter,
+      data,
+      value: payWithEth ? input.amountIn : 0n,
+      chainId: addresses.chainId,
+    },
+    poolKey: launch.poolKey,
+    zeroForOne,
+    deadline,
+  };
+}
+
+export interface PrepareEthBuyParams {
+  /** ETH to spend, in wei. */
+  amountIn: bigint;
+  /**
+   * The wETH/quote Uniswap **v3** pool to route through. Defaults to the SDK's known
+   * route for this chain and quote. Caller-supplied by design: the router holds no
+   * venue config, so a bad route can only hurt the caller — and is bounded by
+   * `minAmountOut` end-to-end.
+   */
+  v3Pool?: Address;
+  /**
+   * Minimum launch tokens out across BOTH legs. Required — this path is exposed to v3
+   * pool depth on top of the curve fee decay, and `0` opts out of protection entirely.
+   */
+  minAmountOut: bigint;
+  /** Optional floor on the ETH→quote leg alone. `amountLimit` is the one that matters. */
+  minQuoteOut?: bigint;
+  deadline?: bigint;
+}
+
+/**
+ * Buy a launch quoted in something the trader doesn't hold (USDC, …) paying entirely in
+ * native ETH: `RallyRouter.swapExactEthIn` wraps `msg.value`, sells it for the quote on
+ * a Uniswap v3 pool, then spends the whole proceeds on the curve — one transaction, no
+ * approvals.
+ *
+ * The v3 pool is validated here (its `token0`/`token1` must be exactly the wETH/quote
+ * pair) so a wrong route fails before signing rather than as an opaque `BadV3Pool`.
+ * Exact-input buys only; there is no ETH-funded sell.
+ */
+export async function prepareEthBuy(
+  client: PublicClientLike,
+  addresses: RallyAddresses,
+  launch: LaunchState,
+  input: PrepareEthBuyParams,
+  defaultRoute?: Address,
+): Promise<{ request: TxRequest; v3Pool: Address; deadline: bigint; zeroForOne: boolean }> {
+  if (launch.quote.isNative) {
+    throw new RallyError(
+      "UNSUPPORTED",
+      "This launch is wETH-quoted — use prepareSwap({ payWithEth: true }), which needs no v3 hop.",
+    );
+  }
+  if (input.amountIn <= 0n) {
+    throw new RallyError("INVALID_AMOUNT", "amountIn (ETH) must be greater than zero.");
+  }
+  if (input.minAmountOut <= 0n) {
+    throw new RallyError(
+      "INVALID_AMOUNT",
+      "minAmountOut is required for an ETH-routed buy: it is the only bound across both " +
+        "the v3 hop and the curve, and 0 opts out of slippage protection entirely.",
+    );
+  }
+
+  const v3Pool = input.v3Pool ?? defaultRoute;
+  if (!v3Pool) {
+    throw new RallyError(
+      "NO_ETH_ROUTE",
+      `No known wETH/${launch.quote.address} v3 pool on chain ${addresses.chainId}. ` +
+        `Pass \`v3Pool\` explicitly.`,
+      { details: { chainId: addresses.chainId, quote: launch.quote.address } },
+    );
+  }
+
+  const [token0, token1] = await Promise.all([
+    readContract(client, { address: v3Pool, abi: uniswapV3PoolAbi, functionName: "token0" }),
+    readContract(client, { address: v3Pool, abi: uniswapV3PoolAbi, functionName: "token1" }),
+  ]);
+  const pair = [token0.toLowerCase(), token1.toLowerCase()];
+  const wanted = [addresses.weth.toLowerCase(), launch.quote.address.toLowerCase()];
+  if (!wanted.every((a) => pair.includes(a))) {
+    throw new RallyError(
+      "BAD_ETH_ROUTE",
+      `${v3Pool} is a ${token0}/${token1} pool, not wETH/${launch.quote.address}. ` +
+        `The router rejects it (BadV3Pool).`,
+      { details: { v3Pool, token0, token1 } },
+    );
+  }
+
+  const zeroForOne = launch.quoteIsCurrency0; // buying: the quote leg is the input
+  const deadline = input.deadline ?? swapDeadline();
+  return {
+    v3Pool,
+    deadline,
+    zeroForOne,
+    request: {
+      to: addresses.rallyRouter,
+      data: encodeFunctionData({
+        abi: rallyRouterAbi,
+        functionName: "swapExactEthIn",
+        args: [
+          launch.poolKey,
+          zeroForOne,
+          "0x",
+          v3Pool,
+          input.minQuoteOut ?? 0n,
+          input.minAmountOut,
+          deadline,
+        ],
+      }),
+      value: input.amountIn,
+      chainId: addresses.chainId,
+    },
+  };
+}
