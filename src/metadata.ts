@@ -47,7 +47,6 @@ export interface PinInput extends LaunchMetadata {
   chainId: number;
   /** The mined CREATE2 address — the pin path must match the address `launch` deploys. */
   tokenAddress: Address;
-  name: string;
 }
 
 /**
@@ -57,7 +56,7 @@ export interface PinInput extends LaunchMetadata {
  */
 export interface MetadataPinner {
   pin(input: PinInput): Promise<string>;
-  /** Upload a logo and get back its public URL, for `imageUrl`. */
+  /** Upload an image and get back its public URL, for `imageUrl` / `bannerUrl`. */
   uploadImage?(file: Blob | ArrayBuffer | Uint8Array, contentType: string): Promise<string>;
 }
 
@@ -216,6 +215,7 @@ export function createRallyPinner(config: MetadataConfig): RallyPinner {
             symbol: input.symbol,
             description: input.description,
             imageUrl: input.imageUrl,
+            bannerUrl: input.bannerUrl,
             website: input.website,
             twitter: input.twitter,
             telegram: input.telegram,
@@ -249,12 +249,18 @@ export function createRallyPinner(config: MetadataConfig): RallyPinner {
   };
 }
 
-/** Strip undefined/blank fields so the pinned JSON stays clean. */
-export function cleanMetadata(meta: LaunchMetadata): LaunchMetadata {
-  const out: LaunchMetadata = {};
+/**
+ * Strip undefined/blank fields so the pinned JSON stays clean.
+ *
+ * The return type keeps `T`'s shape: the required fields are non-blank by the time
+ * anything calls this (`prepareLaunch` validates, and the service rejects blanks
+ * anyway), so narrowing them to optional here would only push a cast onto callers.
+ */
+export function cleanMetadata<T extends LaunchMetadata>(meta: T): T {
+  const out = {} as T;
   for (const [key, value] of Object.entries(meta)) {
     if (typeof value === "string" && value.trim()) {
-      out[key as keyof LaunchMetadata] = value.trim();
+      out[key as keyof T] = value.trim() as T[keyof T];
     }
   }
   return out;

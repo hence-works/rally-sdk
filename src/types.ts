@@ -104,18 +104,43 @@ export interface CurveParams {
   poolFeeBps: bigint;
 }
 
-/** Creator-supplied display metadata pinned to `/<chainId>/<token>.json`. */
+/**
+ * Creator-supplied display metadata pinned to `/<chainId>/<token>.json`.
+ *
+ * `name`, `symbol` and `imageUrl` are required: this is the blob every venue reads
+ * to render a coin, and one without a name or a logo has no usable identity beyond
+ * its address. Everything else is genuinely optional.
+ *
+ * This is the *write* contract. Read models stay nullable — the indexer resolves
+ * arbitrary blobs (a third party can call the hook directly, without pinning here),
+ * so on the read side any of these can be absent.
+ */
 export interface LaunchMetadata {
-  name?: string;
-  symbol?: string;
-  description?: string;
+  name: string;
+  symbol: string;
   /** Absolute https URL of an already-uploaded logo. */
-  imageUrl?: string;
+  imageUrl: string;
+  description?: string;
+  /**
+   * Absolute https URL of an already-uploaded wide banner (~3:1), shown behind the
+   * coin's header. Optional — venues that don't render one can ignore it.
+   */
+  bannerUrl?: string;
   website?: string;
   /** Bare handle or full URL. */
   twitter?: string;
   telegram?: string;
 }
+
+/**
+ * `LaunchMetadata` as handed to `prepareLaunch` / `launch`.
+ *
+ * `name` and `symbol` are already required at the top level of `LaunchParams` and
+ * the SDK copies them into the pinned blob, so repeating them here is optional —
+ * supply them only to pin something different from what the token is deployed with.
+ */
+export type LaunchMetadataParams = Omit<LaunchMetadata, "name" | "symbol"> &
+  Partial<Pick<LaunchMetadata, "name" | "symbol">>;
 
 /** Live on-chain state of one launch. */
 export interface LaunchState {

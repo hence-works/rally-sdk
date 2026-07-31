@@ -208,12 +208,11 @@ export function createRallyClient(config: RallyClientConfig) {
           feePolicy,
           resolveQuote,
           pin: pinner
-            ? async ({ chainId, tokenAddress, name, metadata }) => {
+            ? async ({ chainId, tokenAddress, metadata }) => {
                 bindPinnerWallet(pinner);
                 return pinner.pin({
                   chainId,
                   tokenAddress,
-                  name,
                   ...cleanMetadata(metadata),
                 });
               }

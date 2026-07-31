@@ -123,13 +123,24 @@ const rally = createRallyClient({
 });
 
 const imageUrl = await rally.uploadImage(file, file.type);
+// Optional wide (~3:1) header image, rendered behind the coin's page header.
+const bannerUrl = await rally.uploadImage(banner, banner.type);
 
 await rally.launch({
   name: "Good Dog",
   symbol: "WOOF",
-  metadata: { description: "he is a good dog", imageUrl, twitter: "gooddog" },
+  metadata: {
+    description: "he is a good dog",
+    imageUrl,
+    bannerUrl,
+    twitter: "gooddog",
+  },
 });
 ```
+
+A pinned blob needs `name`, `symbol` and `imageUrl` — `name` and `symbol` default to
+the launch's own, so in practice only the logo has to be supplied. Everything else
+(`description`, `bannerUrl`, socials) is optional.
 
 Rally pins at `/<chainId>/<token>.json`. If you host it yourself, any URL works — the
 contract only stores the string. Already hold a session? Pass `metadata.token` and no

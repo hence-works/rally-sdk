@@ -28,6 +28,7 @@ import type {
   FeePolicy,
   FeeSplit,
   LaunchMetadata,
+  LaunchMetadataParams,
   LaunchStep,
   PublicClientLike,
   QuoteConfig,
@@ -55,8 +56,12 @@ export interface LaunchParams {
   fees?: FeeSplit;
   /** An already-hosted metadata JSON. Mutually exclusive with `metadata`. */
   metadataURI?: string;
-  /** Metadata to pin through the configured service. Mutually exclusive with `metadataURI`. */
-  metadata?: LaunchMetadata;
+  /**
+   * Metadata to pin through the configured service. Mutually exclusive with
+   * `metadataURI`. `imageUrl` is required (upload one with `uploadImage`); `name`
+   * and `symbol` default to this launch's own.
+   */
+  metadata?: LaunchMetadataParams;
   /** A pre-mined salt. Must be creator-bound and hit the vanity pattern. */
   salt?: Hex;
   /**
@@ -192,6 +197,35 @@ export function validateFeeSplit(fees: FeeSplit, policy: FeePolicy): void {
   }
 }
 
+/**
+ * The complete blob to pin, from what the caller supplied plus the launch's own
+ * name and symbol.
+ *
+ * An explicit override wins, but only when it carries something: a blank `name` or
+ * `symbol` would otherwise shadow the launch's own and pin a coin with no identity
+ * on it. `imageUrl` is typed as required, but a JS caller can still omit it, so it
+ * is checked rather than assumed.
+ */
+function resolvePinMetadata(
+  metadata: LaunchMetadataParams,
+  name: string,
+  symbol: string,
+): LaunchMetadata {
+  if (!metadata.imageUrl?.trim()) {
+    throw new RallyError(
+      "METADATA_REQUIRED",
+      "`metadata.imageUrl` is required — upload a logo first (`uploadImage`) and pass " +
+        "its public URL, or self-host the JSON and pass `metadataURI` instead.",
+    );
+  }
+  return {
+    ...metadata,
+    imageUrl: metadata.imageUrl.trim(),
+    name: metadata.name?.trim() || name,
+    symbol: metadata.symbol?.trim() || symbol,
+  };
+}
+
 /** Everything `prepareLaunch` needs that the client already knows. */
 export interface PrepareLaunchContext {
   client: PublicClientLike;
@@ -199,11 +233,14 @@ export interface PrepareLaunchContext {
   factory: Address;
   account?: Address;
   feePolicy: () => Promise<FeePolicy>;
-  /** Pins metadata and returns the URI; absent when no pinner is configured. */
+  /**
+   * Pins metadata and returns the URI; absent when no pinner is configured.
+   * `metadata` arrives fully resolved — `name`/`symbol` already defaulted from the
+   * launch — so a pinner never has to re-derive them.
+   */
   pin?: (input: {
     chainId: number;
     tokenAddress: Address;
-    name: string;
     metadata: LaunchMetadata;
   }) => Promise<string>;
   resolveQuote: (quote: LaunchParams["quote"]) => Address;
@@ -243,6 +280,12 @@ export async function prepareLaunch(
         "pin it through the configured service.",
     );
   }
+  // Resolved (and validated) before the salt grind: a missing logo should cost
+  // nothing, not surface as an opaque 400 from the pinning service after minutes
+  // of mining.
+  const pinMetadata = params.metadata
+    ? resolvePinMetadata(params.metadata, name, symbol)
+    : undefined;
 
   step("resolving");
   const quoteAddress = ctx.resolveQuote(params.quote);
@@ -329,12 +372,19 @@ export async function prepareLaunch(
           "or supply your own `metadataURI`.",
       );
     }
+    // Guaranteed by the check above — this branch means `metadataURI` was absent,
+    // so `metadata` was supplied. Restated so the compiler sees a complete blob.
+    if (!pinMetadata) {
+      throw new RallyError(
+        "METADATA_REQUIRED",
+        "A launch needs either `metadata` or `metadataURI`.",
+      );
+    }
     step("pinning");
     metadataURI = await ctx.pin({
       chainId: addresses.chainId,
       tokenAddress: token,
-      name,
-      metadata: { symbol, ...params.metadata },
+      metadata: pinMetadata,
     });
   }
 

@@ -144,6 +144,7 @@ export type {
   FeePolicy,
   FeeSplit,
   LaunchMetadata,
+  LaunchMetadataParams,
   LaunchState,
   LaunchStep,
   Phase,
