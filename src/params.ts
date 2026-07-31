@@ -34,6 +34,14 @@ export const REGISTRY_KEYS = {
   DEFAULT_DIVIDEND_BPS: 16,
   DEFAULT_BUYBACK_BPS: 17,
   DEFAULT_LP_SUPPORT_BPS: 18,
+  /**
+   * Cap on one fee-funded mechanism self-swap, as bps of the graduated pool's depth.
+   * Bounds each buyback / lp-support / token-conversion flush against live depth rather
+   * than against the accrued bucket, so a long-unflushed bucket drains over several
+   * flushes instead of exceeding the slippage bound forever. Reads back 0 on a registry
+   * deployed before this key existed, which the hook treats as its safe default (100).
+   */
+  FLUSH_MAX_RESERVE_BPS: 19,
 } as const;
 
 export type RegistryKey = (typeof REGISTRY_KEYS)[keyof typeof REGISTRY_KEYS];
