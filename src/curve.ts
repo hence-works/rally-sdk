@@ -53,6 +53,26 @@ export function reserveX(c: Curve, b: bigint): bigint {
   return c.xv + b;
 }
 
+/**
+ * The curve's token reserve `y` for pricing: the on-chain stored value when the caller has
+ * it, else the `K/X(b)` reconstruction.
+ *
+ * Prefer the stored value. It is the exact token count, so `S − y` is exactly the
+ * circulating supply and an estimate built from it matches the fill. `resolveLaunch` always
+ * reads it (`poolReserves` returns `(b, y)` during CURVE), so the SDK's own path is exact.
+ *
+ * The fallback exists for adapted state — a UI pricing a grid of coins off indexed rows
+ * without an RPC read per card. It is the quantity the contract itself used to derive, and
+ * it sits at or below the stored `y` by up to `y/X` tokens (~0.2 tokens on a 6dp quote).
+ * Since a smaller `y` *over*-estimates a sell payout, the difference is in the direction
+ * that could produce an unsatisfiable bound — but at ~1e-6 quote units it is some six
+ * orders of magnitude inside any sane slippage tolerance. Use the stored value anywhere the
+ * number is used to bound a transaction.
+ */
+export function curveTokenReserve(c: Curve, b: bigint, stored?: bigint): bigint {
+  return stored !== undefined && stored > 0n ? stored : reserveY(c, b);
+}
+
 /** Token reserve `Y(b) = K / X(b)` (18dp). */
 export function reserveY(c: Curve, b: bigint): bigint {
   return c.K / (c.xv + b);
@@ -79,45 +99,52 @@ export function fdv(c: Curve, b: bigint): bigint {
   return (X * X * c.S) / c.K;
 }
 
-/** Tokens out for adding `dQuote` at state `b`: `K/X − K/(X + dQuote)`. */
-export function tokensOutForBuy(c: Curve, b: bigint, dQuote: bigint): bigint {
+/**
+ * The four trading primitives, mirroring `CurveMath`. Each takes BOTH reserves — the quote
+ * side as `b`, the token side as `y` — because the contract now persists both.
+ *
+ * Reconstructing `y` as `K/X(b)` instead is algebraically identical but not exact: `b` is
+ * denominated in the quote's base units, and one such unit is worth `dY/dX = y/X` tokens
+ * (~1e17 against a 6dp quote). The contract used to do that and drifted a fraction of a
+ * whole token per sell, which is what made a full-balance sell unpriceable. Mirror the
+ * stored pair so an SDK estimate and the on-chain fill agree exactly.
+ */
+
+/** Tokens out for adding `dQuote` against `(b, y)`: `y·dQuote / (X + dQuote)`. */
+export function tokensOutForBuy(c: Curve, b: bigint, y: bigint, dQuote: bigint): bigint {
   const X = c.xv + b;
-  return c.K / X - c.K / (X + dQuote);
+  return (y * dQuote) / (X + dQuote);
 }
 
-/** Quote out for selling `dTokens` at state `b`: `X − K/(Y + dTokens)`. */
-export function quoteOutForSell(c: Curve, b: bigint, dTokens: bigint): bigint {
-  const X = c.xv + b;
-  const Y = c.K / X;
-  return X - c.K / (Y + dTokens);
+/** Quote out for selling `dTokens` against `(b, y)`: `X·dTokens / (y + dTokens)`. */
+export function quoteOutForSell(c: Curve, b: bigint, y: bigint, dTokens: bigint): bigint {
+  const denom = y + dTokens;
+  if (denom <= 0n) return 0n;
+  return ((c.xv + b) * dTokens) / denom;
 }
 
 /**
  * Net quote that must be bonded to receive exactly `dTokens` — the inverse of
  * {tokensOutForBuy}. Rounds UP, so the curve never under-charges an exact-output buy.
- * Caller must ensure `dTokens < Y(b)`.
+ * Caller must ensure `dTokens < y`.
  */
-export function quoteInForBuy(c: Curve, b: bigint, dTokens: bigint): bigint {
-  const X = c.xv + b;
-  const Y = c.K / X;
-  const denom = Y - dTokens;
+export function quoteInForBuy(c: Curve, b: bigint, y: bigint, dTokens: bigint): bigint {
+  const denom = y - dTokens;
   if (denom <= 0n) return 0n; // precondition violated — caller handles crossing
-  const xNew = (c.K + denom - 1n) / denom;
-  return xNew - X;
+  const num = (c.xv + b) * dTokens;
+  return (num + denom - 1n) / denom;
 }
 
 /**
  * Tokens that must be sold to withdraw exactly `dQuote` pre-fee — the inverse of
  * {quoteOutForSell}. Rounds UP, so the curve never over-pays. Caller must ensure
- * `dQuote ≤ b`.
+ * `dQuote <= b`.
  */
-export function tokensInForSell(c: Curve, b: bigint, dQuote: bigint): bigint {
-  const X = c.xv + b;
-  const Y = c.K / X;
-  const denom = X - dQuote;
+export function tokensInForSell(c: Curve, b: bigint, y: bigint, dQuote: bigint): bigint {
+  const denom = c.xv + b - dQuote;
   if (denom <= 0n) return 0n;
-  const yNew = (c.K + denom - 1n) / denom;
-  return yNew - Y;
+  const num = y * dQuote;
+  return (num + denom - 1n) / denom;
 }
 
 /** Tokens paired with all `B` quote in the locked full-range LP: `L = B·K / X(B)²`. */
@@ -225,6 +252,7 @@ export interface CurvePreview {
 export function previewBuy(
   c: Curve,
   b: bigint,
+  y: bigint,
   grossQuote: bigint,
   feeBps: bigint,
   poolFeeBps: bigint,
@@ -237,7 +265,7 @@ export function previewBuy(
 
   if (b + net < c.B) {
     return {
-      amountOut: tokensOutForBuy(c, b, net),
+      amountOut: tokensOutForBuy(c, b, y, net),
       feeQuote: fee,
       crossesGraduation: false,
     };
@@ -245,7 +273,7 @@ export function previewBuy(
 
   const netToB = c.B - b;
   const grossToB = grossUpForFee(netToB, feeBps);
-  const curveTokens = tokensOutForBuy(c, b, netToB);
+  const curveTokens = tokensOutForBuy(c, b, y, netToB);
   const remainder = grossQuote > grossToB ? grossQuote - grossToB : 0n;
 
   const inAfterFee = remainder - (remainder * poolFeeBps) / BPS;
@@ -267,13 +295,17 @@ export function previewBuy(
 export function previewSell(
   c: Curve,
   b: bigint,
+  y: bigint,
   tokensIn: bigint,
   feeBps: bigint,
 ): CurvePreview {
   if (tokensIn <= 0n) {
     return { amountOut: 0n, feeQuote: 0n, crossesGraduation: false };
   }
-  let quoteOut = quoteOutForSell(c, b, tokensIn);
+  // The clamp mirrors `LaunchCurve._sell`. With the stored reserve pair it is unreachable
+  // for any `tokensIn <= S - y`, i.e. anything actually holdable; it stays so that a stale
+  // or adapted `y` degrades into a bounded estimate rather than one the router will reject.
+  let quoteOut = quoteOutForSell(c, b, y, tokensIn);
   if (quoteOut > b) quoteOut = b;
   const fee = (quoteOut * feeBps) / BPS;
   return { amountOut: quoteOut - fee, feeQuote: fee, crossesGraduation: false };
@@ -297,6 +329,7 @@ export interface CurveCostPreview {
 export function previewBuyExactOut(
   c: Curve,
   b: bigint,
+  y: bigint,
   wantTokens: bigint,
   feeBps: bigint,
   poolFeeBps: bigint,
@@ -304,7 +337,7 @@ export function previewBuyExactOut(
   if (wantTokens <= 0n) {
     return { amountIn: 0n, feeQuote: 0n, crossesGraduation: false };
   }
-  const curveTokens = tokensOutForBuy(c, b, c.B - b); // Y(b) − Y(B)
+  const curveTokens = tokensOutForBuy(c, b, y, c.B - b); // the curve's remaining tokens
   if (wantTokens >= curveTokens) {
     const netToB = c.B - b;
     const grossToB = grossUpForFee(netToB, feeBps);
@@ -320,7 +353,7 @@ export function previewBuyExactOut(
       crossesGraduation: true,
     };
   }
-  const net = quoteInForBuy(c, b, wantTokens);
+  const net = quoteInForBuy(c, b, y, wantTokens);
   const gross = grossUpForFee(net, feeBps);
   return { amountIn: gross, feeQuote: gross - net, crossesGraduation: false };
 }
@@ -333,6 +366,7 @@ export function previewBuyExactOut(
 export function previewSellExactOut(
   c: Curve,
   b: bigint,
+  y: bigint,
   wantQuote: bigint,
   feeBps: bigint,
 ): CurveCostPreview | null {
@@ -341,6 +375,6 @@ export function previewSellExactOut(
   }
   const quoteGross = grossUpForFee(wantQuote, feeBps);
   if (quoteGross > b) return null;
-  const dTok = tokensInForSell(c, b, quoteGross);
+  const dTok = tokensInForSell(c, b, y, quoteGross);
   return { amountIn: dTok, feeQuote: quoteGross - wantQuote, crossesGraduation: false };
 }

@@ -28,6 +28,7 @@ import {
   clmmAmountOut,
   curveFeeBps,
   initCurve,
+  curveTokenReserve,
   previewBuy,
   previewBuyExactOut,
   previewSell,
@@ -232,11 +233,16 @@ export function quoteTrade(
   let crossesGraduation = false;
   let exact = false;
 
+  // The curve's token reserve: stored on-chain and returned by `poolReserves` during
+  // CURVE, so an estimate matches the fill exactly. Falls back to the `K/X(b)`
+  // reconstruction for adapted state — see {curveTokenReserve}.
+  const curveY = curve ? curveTokenReserve(curve, launch.bonded, launch.reserves.token) : 0n;
+
   if (curve) {
     const preview =
       side === "buy"
-        ? previewBuy(curve, launch.bonded, amountIn, feeBps, params.poolFeeBps)
-        : previewSell(curve, launch.bonded, amountIn, feeBps);
+        ? previewBuy(curve, launch.bonded, curveY, amountIn, feeBps, params.poolFeeBps)
+        : previewSell(curve, launch.bonded, curveY, amountIn, feeBps);
     amountOut = preview.amountOut;
     feeQuote = preview.feeQuote;
     crossesGraduation = preview.crossesGraduation;
@@ -313,8 +319,21 @@ export function quoteTradeExactOut(
 
   const preview =
     input.side === "buy"
-      ? previewBuyExactOut(curve, launch.bonded, input.amountOut, feeBps, params.poolFeeBps)
-      : previewSellExactOut(curve, launch.bonded, input.amountOut, feeBps);
+      ? previewBuyExactOut(
+          curve,
+          launch.bonded,
+          curveTokenReserve(curve, launch.bonded, launch.reserves.token),
+          input.amountOut,
+          feeBps,
+          params.poolFeeBps,
+        )
+      : previewSellExactOut(
+          curve,
+          launch.bonded,
+          curveTokenReserve(curve, launch.bonded, launch.reserves.token),
+          input.amountOut,
+          feeBps,
+        );
 
   if (!preview) {
     throw new RallyError(

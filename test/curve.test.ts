@@ -19,6 +19,7 @@ import {
   previewSellExactOut,
   pricePerTokenWad,
   quoteInForBuy,
+  curveTokenReserve,
   reserveY,
   scaleFor,
   tokensOutForBuy,
@@ -116,27 +117,27 @@ describe("previewBuy", () => {
   it("takes the fee off the input, then bonds the rest", () => {
     const gross = 10n ** 18n;
     const feeBps = 2_500n;
-    const preview = previewBuy(curve, 0n, gross, feeBps, 30n);
+    const preview = previewBuy(curve, 0n, reserveY(curve, 0n), gross, feeBps, 30n);
     expect(preview.feeQuote).toBe((gross * feeBps) / BPS);
-    expect(preview.amountOut).toBe(tokensOutForBuy(curve, 0n, gross - preview.feeQuote));
+    expect(preview.amountOut).toBe(tokensOutForBuy(curve, 0n, reserveY(curve, 0n), gross - preview.feeQuote));
     expect(preview.crossesGraduation).toBe(false);
   });
 
   it("flags a buy that bonds b all the way to B", () => {
-    const preview = previewBuy(curve, 0n, B * 2n, 100n, 30n);
+    const preview = previewBuy(curve, 0n, reserveY(curve, 0n), B * 2n, 100n, 30n);
     expect(preview.crossesGraduation).toBe(true);
     // It still delivers at least everything the curve had left.
-    expect(preview.amountOut).toBeGreaterThanOrEqual(tokensOutForBuy(curve, 0n, B));
+    expect(preview.amountOut).toBeGreaterThanOrEqual(tokensOutForBuy(curve, 0n, reserveY(curve, 0n), B));
   });
 
   it("returns zero for a zero-size trade", () => {
-    expect(previewBuy(curve, 0n, 0n, 100n, 30n).amountOut).toBe(0n);
+    expect(previewBuy(curve, 0n, reserveY(curve, 0n), 0n, 100n, 30n).amountOut).toBe(0n);
   });
 
   it("delivers less per unit as the curve fills", () => {
     const size = 10n ** 17n;
-    const early = previewBuy(curve, 0n, size, 100n, 30n).amountOut;
-    const late = previewBuy(curve, B / 2n, size, 100n, 30n).amountOut;
+    const early = previewBuy(curve, 0n, reserveY(curve, 0n), size, 100n, 30n).amountOut;
+    const late = previewBuy(curve, B / 2n, reserveY(curve, B / 2n), size, 100n, 30n).amountOut;
     expect(late).toBeLessThan(early);
   });
 });
@@ -145,21 +146,22 @@ describe("previewSell", () => {
   it("takes the fee off the output", () => {
     const tokens = 1_000_000n * 10n ** 18n;
     const b = B / 2n;
-    const preview = previewSell(curve, b, tokens, 100n);
+    const preview = previewSell(curve, b, reserveY(curve, b), tokens, 100n);
     expect(preview.amountOut).toBeGreaterThan(0n);
     expect(preview.feeQuote).toBeGreaterThan(0n);
     expect(preview.crossesGraduation).toBe(false);
   });
 
   it("never pays out more than the bonded reserve", () => {
-    const preview = previewSell(curve, B / 10n, S, 100n);
+    const preview = previewSell(curve, B / 10n, reserveY(curve, B / 10n), S, 100n);
     expect(preview.amountOut).toBeLessThanOrEqual(B / 10n);
   });
 
   it("round-trips a buy back to at most what went in (fees make it strictly less)", () => {
     const spend = 10n ** 18n;
-    const bought = previewBuy(curve, 0n, spend, 100n, 30n);
-    const back = previewSell(curve, spend - bought.feeQuote, bought.amountOut, 100n);
+    const bought = previewBuy(curve, 0n, reserveY(curve, 0n), spend, 100n, 30n);
+    // Sell back against the real post-buy pair, which is what the contract stores.
+    const back = previewSell(curve, spend - bought.feeQuote, S - bought.amountOut, bought.amountOut, 100n);
     expect(back.amountOut).toBeLessThan(spend);
   });
 });
@@ -167,10 +169,10 @@ describe("previewSell", () => {
 describe("exact-output previews", () => {
   it("inverts the exact-in buy", () => {
     const want = 1_000_000n * 10n ** 18n;
-    const cost = previewBuyExactOut(curve, 0n, want, 100n, 30n);
+    const cost = previewBuyExactOut(curve, 0n, reserveY(curve, 0n), want, 100n, 30n);
     expect(cost.crossesGraduation).toBe(false);
     // Spending the computed input must deliver at least what was asked for.
-    const forward = previewBuy(curve, 0n, cost.amountIn, 100n, 30n);
+    const forward = previewBuy(curve, 0n, reserveY(curve, 0n), cost.amountIn, 100n, 30n);
     expect(forward.amountOut).toBeGreaterThanOrEqual(want);
     // …and not wildly more: rounding is a few wei, not a percent.
     expect(forward.amountOut - want).toBeLessThan(want / 1_000_000n + 10n);
@@ -178,15 +180,15 @@ describe("exact-output previews", () => {
 
   it("prices the net quote via the curve inverse plus the fee grossup", () => {
     const want = 1_000n * 10n ** 18n;
-    const net = quoteInForBuy(curve, 0n, want);
-    const cost = previewBuyExactOut(curve, 0n, want, 2_500n, 30n);
+    const net = quoteInForBuy(curve, 0n, reserveY(curve, 0n), want);
+    const cost = previewBuyExactOut(curve, 0n, reserveY(curve, 0n), want, 2_500n, 30n);
     expect(cost.amountIn).toBe(grossUpForFee(net, 2_500n));
     expect(cost.feeQuote).toBe(cost.amountIn - net);
   });
 
   it("flags an exact-out buy large enough to graduate", () => {
-    const all = tokensOutForBuy(curve, 0n, B);
-    const cost = previewBuyExactOut(curve, 0n, all + 10n ** 18n, 100n, 30n);
+    const all = tokensOutForBuy(curve, 0n, reserveY(curve, 0n), B);
+    const cost = previewBuyExactOut(curve, 0n, reserveY(curve, 0n), all + 10n ** 18n, 100n, 30n);
     expect(cost.crossesGraduation).toBe(true);
     expect(cost.amountIn).toBeGreaterThan(B);
   });
@@ -194,13 +196,13 @@ describe("exact-output previews", () => {
   it("inverts the exact-in sell", () => {
     const b = B / 2n;
     const want = 10n ** 17n;
-    const cost = previewSellExactOut(curve, b, want, 100n)!;
-    const forward = previewSell(curve, b, cost.amountIn, 100n);
+    const cost = previewSellExactOut(curve, b, reserveY(curve, b), want, 100n)!;
+    const forward = previewSell(curve, b, reserveY(curve, b), cost.amountIn, 100n);
     expect(forward.amountOut).toBeGreaterThanOrEqual(want);
   });
 
   it("refuses to withdraw more than the bonded reserve", () => {
-    expect(previewSellExactOut(curve, 10n ** 15n, B, 100n)).toBeNull();
+    expect(previewSellExactOut(curve, 10n ** 15n, reserveY(curve, 10n ** 15n), B, 100n)).toBeNull();
   });
 });
 
@@ -293,5 +295,65 @@ describe("clmmAmountOut — graduated pool", () => {
     expect(clmmAmountOut(10n ** 18n, 0n, Q_RESERVE, 100n)).toBe(0n);
     expect(clmmAmountOut(10n ** 18n, T_RESERVE, 0n, 100n)).toBe(0n);
     expect(clmmAmountOut(0n, T_RESERVE, Q_RESERVE, 100n)).toBe(0n);
+  });
+});
+
+describe("stored token reserve", () => {
+  it("prefers the stored y and falls back to the K/X(b) reconstruction", () => {
+    const b = B / 3n;
+    const stored = reserveY(curve, b) + 12_345n;
+    expect(curveTokenReserve(curve, b, stored)).toBe(stored);
+    expect(curveTokenReserve(curve, b, undefined)).toBe(reserveY(curve, b));
+    // Zero is treated as "not supplied": an adapted row that carries no token leg must
+    // not be read as an empty curve, which would price a sell at the whole quote reserve.
+    expect(curveTokenReserve(curve, b, 0n)).toBe(reserveY(curve, b));
+  });
+
+  it("keeps `S - y` exactly equal to the circulating supply across a sequence", () => {
+    // Mirrors the Solidity fuzz: the contract stores both reserves and moves each by the
+    // exact amount traded, so the SDK must too. Reconstructing y from b instead drifted a
+    // fraction of a whole token per sell, which is what made Sell Max unpriceable.
+    let b = 0n;
+    let y = S;
+    let held = 0n;
+
+    const buy = (gross: bigint) => {
+      const p = previewBuy(curve, b, y, gross, 0n, 30n);
+      b += gross;
+      y -= p.amountOut;
+      held += p.amountOut;
+    };
+    const sell = (tokens: bigint) => {
+      const p = previewSell(curve, b, y, tokens, 0n);
+      b -= p.amountOut + p.feeQuote;
+      y += tokens;
+      held -= tokens;
+    };
+
+    buy(10n ** 18n);
+    expect(S - y).toBe(held);
+    sell(held / 4n);
+    expect(S - y).toBe(held);
+    buy(5n * 10n ** 17n);
+    expect(S - y).toBe(held);
+    sell(held / 3n);
+    expect(S - y).toBe(held);
+
+    // Sell Max is priceable and never asks for more than the curve holds.
+    const finalSell = previewSell(curve, b, y, held, 0n);
+    expect(finalSell.amountOut).toBeGreaterThan(0n);
+    expect(finalSell.amountOut + finalSell.feeQuote).toBeLessThanOrEqual(b);
+  });
+
+  it("prices a full-balance sell strictly below the bonded reserve", () => {
+    // The old reconstruction let a holder accumulate tokens the curve would price above
+    // `b`; with the pair, the whole holdable balance always fits inside it.
+    const gross = 2n * 10n ** 18n;
+    const bought = previewBuy(curve, 0n, S, gross, 100n, 30n);
+    const b = gross - bought.feeQuote;
+    const y = S - bought.amountOut;
+    const exit = previewSell(curve, b, y, bought.amountOut, 100n);
+    expect(exit.amountOut + exit.feeQuote).toBeLessThanOrEqual(b);
+    expect(exit.amountOut).toBeGreaterThan(0n);
   });
 });

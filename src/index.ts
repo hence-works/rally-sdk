@@ -84,6 +84,7 @@ export {
   pricePerTokenWad,
   quoteInForBuy,
   quoteOutForSell,
+  curveTokenReserve,
   reserveX,
   reserveY,
   scaleFor,
