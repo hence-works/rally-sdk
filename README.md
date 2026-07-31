@@ -95,7 +95,7 @@ result.firstBuyTokens;  // what `initialBuy` actually bought, if any
 Four things worth knowing, because they constrain the order of operations:
 
 - **The token address is mined, not assigned.** Rally's factory requires the launch
-  token to land on a vanity pattern (`0xba5e…` by default), so the SDK grinds a CREATE2
+  token to land on a vanity pattern (`0x1f60…` by default), so the SDK grinds a CREATE2
   salt first. That salt is *creator-bound* — its high 20 bytes must equal the sending
   account — so the address commits to its creator and can't be front-run off public
   calldata.

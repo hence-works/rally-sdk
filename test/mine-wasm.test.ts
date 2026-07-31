@@ -14,7 +14,7 @@ import { matchesVanity, saltCreator, type Vanity } from "../src/salt";
 const CREATOR: Address = "0x1111111111111111111111111111111111111111";
 const DEPLOYER: Address = "0xA70e6e3D871687D1ddf8a9D493e33A67Ac066653";
 const INIT_CODE_HASH = keccak256(toHex("RallyToken"));
-const BA5E: Vanity = { prefixLen: 4, prefixBits: 0xba5en, suffixLen: 0, suffixBits: 0n };
+const LFGO: Vanity = { prefixLen: 4, prefixBits: 0x1f60n, suffixLen: 0, suffixBits: 0n };
 
 const base = {
   deployer: DEPLOYER,
@@ -29,11 +29,11 @@ describe("WASM miner", () => {
   });
 
   it("produces a salt whose CREATE2 address viem agrees with", async () => {
-    const result = await mineVanitySaltWasm({ ...base, vanity: BA5E });
+    const result = await mineVanitySaltWasm({ ...base, vanity: LFGO });
     expect(result.address).toBe(
       getCreate2Address({ from: DEPLOYER, salt: result.salt, bytecodeHash: INIT_CODE_HASH }),
     );
-    expect(matchesVanity(result.address, BA5E)).toBe(true);
+    expect(matchesVanity(result.address, LFGO)).toBe(true);
     expect(saltCreator(result.salt).toLowerCase()).toBe(CREATOR.toLowerCase());
   });
 
@@ -42,8 +42,8 @@ describe("WASM miner", () => {
     // curve of keccak digests, not of the implementation. Divergence here means one
     // engine is hashing a different preimage.
     const [wasm, js] = await Promise.all([
-      mineVanitySaltWasm({ ...base, vanity: BA5E }),
-      mineVanitySaltJs({ ...base, vanity: BA5E }),
+      mineVanitySaltWasm({ ...base, vanity: LFGO }),
+      mineVanitySaltJs({ ...base, vanity: LFGO }),
     ]);
     expect(wasm.salt).toBe(js.salt);
     expect(wasm.address).toBe(js.address);
@@ -63,8 +63,8 @@ describe("WASM miner", () => {
   it("agrees with the JS loop when sharded", async () => {
     const shard = { startNonce: 3n, stride: 7n };
     const [wasm, js] = await Promise.all([
-      mineVanitySaltWasm({ ...base, vanity: BA5E, ...shard }),
-      mineVanitySaltJs({ ...base, vanity: BA5E, ...shard }),
+      mineVanitySaltWasm({ ...base, vanity: LFGO, ...shard }),
+      mineVanitySaltJs({ ...base, vanity: LFGO, ...shard }),
     ]);
     expect(wasm.salt).toBe(js.salt);
     expect(wasm.attempts).toBe(js.attempts);
@@ -101,12 +101,12 @@ describe("WASM miner", () => {
 
 describe("engine selection", () => {
   it("uses WASM by default", async () => {
-    const result = await mineVanitySalt({ ...base, vanity: BA5E });
+    const result = await mineVanitySalt({ ...base, vanity: LFGO });
     expect(result.engine).toBe("wasm");
   });
 
   it("uses the JS loop when forced", async () => {
-    const result = await mineVanitySalt({ ...base, vanity: BA5E, engine: "js" });
+    const result = await mineVanitySalt({ ...base, vanity: LFGO, engine: "js" });
     expect(result.engine).toBe("js");
   });
 
@@ -131,15 +131,15 @@ describe("engine selection", () => {
 
   it("falls back to JS when WASM can't be instantiated", async () => {
     await withoutWebAssembly(async (mine) => {
-      const result = await mine({ ...base, vanity: BA5E });
+      const result = await mine({ ...base, vanity: LFGO });
       expect(result.engine).toBe("js");
-      expect(matchesVanity(result.address, BA5E)).toBe(true);
+      expect(matchesVanity(result.address, LFGO)).toBe(true);
     });
   });
 
   it("throws instead of falling back when WASM is demanded", async () => {
     await withoutWebAssembly(async (mine) => {
-      await expect(mine({ ...base, vanity: BA5E, engine: "wasm" })).rejects.toThrow(
+      await expect(mine({ ...base, vanity: LFGO, engine: "wasm" })).rejects.toThrow(
         /WebAssembly is unavailable/,
       );
     });

@@ -3,7 +3,7 @@
  *
  * `RallyFactory.launch(name, symbol, metadataURI, salt, …)` deploys the ERC-20 with
  * CREATE2, and the salt is mined off-chain so the token lands at a vanity address
- * (by default `0xba5e…`). Two properties follow, and both matter to an integrator:
+ * (by default `0x1f60…`). Two properties follow, and both matter to an integrator:
  *
  *   - the address is a pure function of the salt, so it is knowable *before* the
  *     launch transaction — which is what lets metadata be pinned at
@@ -66,7 +66,7 @@ export function matchesVanity(address: Address, v: Vanity): boolean {
   return (!prefix || a.startsWith(prefix)) && (!suffix || a.endsWith(suffix));
 }
 
-/** Human display of the pattern, e.g. `0xba5e…` (or `0x…` when unset). */
+/** Human display of the pattern, e.g. `0x1f60…` (or `0x…` when unset). */
 export function formatVanity(v: Vanity): string {
   const { prefix, suffix } = matchers(v);
   return `${prefix ?? "0x"}…${suffix ?? ""}`;

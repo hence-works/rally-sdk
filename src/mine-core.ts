@@ -7,7 +7,7 @@
  * then grind salts with no RPC per attempt. The loop hashes into one preallocated
  * 85-byte buffer (`0xff ‖ deployer ‖ salt ‖ initCodeHash`, exactly one keccak block)
  * and tests the digest byte-wise, so an attempt costs a keccak and nothing else — no
- * hex strings, no allocations. At the default 4-nibble pattern (`0xba5e…`) that is
+ * hex strings, no allocations. At the default 4-nibble pattern (`0x1f60…`) that is
  * ~65k expected attempts: fast enough here, and ~2× faster again in WASM.
  *
  * Runs anywhere: no worker_threads, no DOM. Callers who want more throughput can

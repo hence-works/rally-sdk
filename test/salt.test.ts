@@ -24,8 +24,8 @@ const DEPLOYER: Address = "0xA70e6e3D871687D1ddf8a9D493e33A67Ac066653";
 const INIT_CODE_HASH = keccak256(toHex("RallyToken"));
 
 const NO_VANITY: Vanity = { prefixLen: 0, prefixBits: 0n, suffixLen: 0, suffixBits: 0n };
-/** The factory's default pattern: addresses starting `0xba5e`. */
-const BA5E: Vanity = { prefixLen: 4, prefixBits: 0xba5en, suffixLen: 0, suffixBits: 0n };
+/** The factory's default pattern: addresses starting `0x1f60`. */
+const LFGO: Vanity = { prefixLen: 4, prefixBits: 0x1f60n, suffixLen: 0, suffixBits: 0n };
 
 describe("packSalt", () => {
   it("puts the creator in the high 20 bytes and the nonce in the low 12", () => {
@@ -98,7 +98,7 @@ describe("mineVanitySalt", () => {
       deployer: DEPLOYER,
       creator: CREATOR,
       initCodeHash: INIT_CODE_HASH,
-      vanity: BA5E,
+      vanity: LFGO,
       yieldBetweenBatches: false,
     });
 
@@ -106,7 +106,7 @@ describe("mineVanitySalt", () => {
     expect(result.address).toBe(
       getCreate2Address({ from: DEPLOYER, salt: result.salt, bytecodeHash: INIT_CODE_HASH }),
     );
-    expect(matchesVanity(result.address, BA5E)).toBe(true);
+    expect(matchesVanity(result.address, LFGO)).toBe(true);
     expect(saltCreator(result.salt).toLowerCase()).toBe(CREATOR.toLowerCase());
     expect(result.attempts).toBeGreaterThan(0);
   });
@@ -131,12 +131,12 @@ describe("mineVanitySalt", () => {
       deployer: DEPLOYER,
       creator: CREATOR,
       initCodeHash: INIT_CODE_HASH,
-      vanity: BA5E,
+      vanity: LFGO,
       startNonce: 1n,
       stride: 4n,
       yieldBetweenBatches: false,
     });
-    expect(matchesVanity(shard.address, BA5E)).toBe(true);
+    expect(matchesVanity(shard.address, LFGO)).toBe(true);
     // Sharded nonces stay on their own residue class, so they cannot collide.
     expect((BigInt(shard.salt) & ((1n << 96n) - 1n)) % 4n).toBe(1n);
   });
@@ -147,7 +147,7 @@ describe("mineVanitySalt", () => {
       deployer: DEPLOYER,
       creator: CREATOR,
       initCodeHash: INIT_CODE_HASH,
-      vanity: BA5E,
+      vanity: LFGO,
       startNonce: start,
       yieldBetweenBatches: false,
     });
@@ -200,7 +200,7 @@ describe("mineVanitySalt", () => {
 
 describe("formatVanity / vanityDifficulty", () => {
   it("renders the pattern for display", () => {
-    expect(formatVanity(BA5E)).toBe("0xba5e…");
+    expect(formatVanity(LFGO)).toBe("0x1f60…");
     expect(formatVanity(NO_VANITY)).toBe("0x…");
     expect(
       formatVanity({ prefixLen: 2, prefixBits: 0xban, suffixLen: 2, suffixBits: 0x5en }),
@@ -208,7 +208,7 @@ describe("formatVanity / vanityDifficulty", () => {
   });
 
   it("reports the expected attempt count", () => {
-    expect(vanityDifficulty(BA5E)).toBe(65_536);
+    expect(vanityDifficulty(LFGO)).toBe(65_536);
     expect(vanityDifficulty(NO_VANITY)).toBe(1);
   });
 });
