@@ -132,6 +132,45 @@ export function grossUpForFee(net: bigint, feeBps: bigint): bigint {
   return (net * BPS + denom - 1n) / denom;
 }
 
+/**
+ * Exact-input output from the graduated pool, priced against its ACTUAL reserves.
+ *
+ * The locked position spans the full tick range, so within it the pool behaves as a
+ * constant product on the two reserves `poolReserves(pid)` reports — and pricing against
+ * those is the whole point. A straight line off spot models zero price impact, which is
+ * only harmless for trades that are small relative to depth; a launch graduates with just
+ * `B` of quote behind it, so an exit sized like a creator's stack is a majority-impact
+ * trade and spot overstates the proceeds several-fold. Quoting that way does not merely
+ * mislead the UI — the slippage bound derived from it is unreachable, so the router
+ * rejects the swap with `InsufficientOutput` and the position looks unsellable.
+ *
+ * v4 takes the LP fee off the INPUT of an exact-input swap, so the fee is applied before
+ * the invariant, matching `Pool.swap`.
+ *
+ * Accurate to well under a tenth of a percent against a live pool. It is not exact: the
+ * range is finite rather than truly `(0, ∞)`, so the reserves imply a slightly different
+ * curvature than pure `xy = k`. That residual is why a graduated quote stays
+ * `exact: false` and keeps the wider tolerance — which now absorbs other traders moving
+ * the pool between quote and inclusion, its actual job.
+ *
+ * @param reserveIn  reserve of the leg being paid in, base units.
+ * @param reserveOut reserve of the leg being received, base units.
+ * @param poolFeeBps the graduated pool's LP fee (POOL_FEE_BPS).
+ */
+export function clmmAmountOut(
+  amountIn: bigint,
+  reserveIn: bigint,
+  reserveOut: bigint,
+  poolFeeBps: bigint,
+): bigint {
+  if (amountIn <= 0n || reserveIn <= 0n || reserveOut <= 0n) return 0n;
+  const fee = poolFeeBps >= BPS ? BPS - 1n : poolFeeBps < 0n ? 0n : poolFeeBps;
+  const inAfterFee = (amountIn * (BPS - fee)) / BPS;
+  if (inAfterFee <= 0n) return 0n;
+  // Floor, so the estimate never sits above what the pool would actually pay.
+  return (reserveOut * inAfterFee) / (reserveIn + inAfterFee);
+}
+
 /** Governance params driving the §4.2 anti-snipe fee decay. */
 export interface CurveFeeParams {
   /** CURVE_FEE_START_BPS — fee at launch. */

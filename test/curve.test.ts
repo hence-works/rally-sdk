@@ -7,6 +7,7 @@
 import { describe, expect, it } from "vitest";
 import {
   BPS,
+  clmmAmountOut,
   curveFeeBps,
   fdv,
   grossUpForFee,
@@ -228,5 +229,69 @@ describe("curve construction", () => {
     const K = (SC * xv * (xv + B)) / B;
     const expected: Curve = { S, Sc: SC, B, xv, K };
     expect(curve).toEqual(expected);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Graduated-pool pricing (clmmAmountOut)
+//
+// Regression for a real staging failure: a graduated pool was quoted off spot
+// (`poolPriceWad`), which models zero price impact. A creator holding 61% of supply
+// tried to exit into a pool holding ~0.837 wETH / 191.2M tokens; spot said 2.5719
+// wETH, the pool actually paid 0.6298, and the 5% bound derived from spot was
+// unreachable — so `RallyRouter` reverted `InsufficientOutput` and the position
+// looked unsellable. The figures below are the live on-chain state and the fill the
+// pool really produced, captured from Sepolia.
+// ─────────────────────────────────────────────────────────────────────────────
+describe("clmmAmountOut — graduated pool", () => {
+  // Sepolia launch 0xba5e4840cc84ff5f1795ceaf77b790df014b7658, hook 0x1B8e0c41…
+  const Q_RESERVE = 836740873017552922n; // 0.83674 wETH
+  const T_RESERVE = 191218100082752180896397374n; // 191.218M tokens
+  const POOL_FEE_BPS = 100n; // 1%
+  const FULL_STACK = 587740113987349419220428730n; // 587.74M tokens
+  const ACTUAL_FILL = 629776740259494485n; // what the pool paid, on-chain
+
+  it("matches the pool's real fill for a majority-impact exit", () => {
+    const out = clmmAmountOut(FULL_STACK, T_RESERVE, Q_RESERVE, POOL_FEE_BPS);
+    // Within 0.1% of the on-chain result — a finite tick range is not precisely xy=k.
+    const diff = out > ACTUAL_FILL ? out - ACTUAL_FILL : ACTUAL_FILL - out;
+    expect(Number((diff * 10_000n) / ACTUAL_FILL)).toBeLessThan(10); // < 0.1%
+  });
+
+  it("never overstates what the pool will pay", () => {
+    // The bound is derived from this, so erring high is what breaks trades.
+    expect(clmmAmountOut(FULL_STACK, T_RESERVE, Q_RESERVE, POOL_FEE_BPS)).toBeLessThanOrEqual(
+      ACTUAL_FILL,
+    );
+  });
+
+  it("a 5% bound off this estimate is satisfiable, unlike one off spot", () => {
+    const est = clmmAmountOut(FULL_STACK, T_RESERVE, Q_RESERVE, POOL_FEE_BPS);
+    expect((est * 9500n) / 10_000n).toBeLessThanOrEqual(ACTUAL_FILL);
+
+    // The old behaviour, for contrast: spot × amountIn ignores impact entirely.
+    const POOL_PRICE_WAD = 4375845553n; // hook.poolPriceWad(pid)
+    const spotEst = (FULL_STACK * POOL_PRICE_WAD) / 10n ** 18n;
+    expect((spotEst * 9500n) / 10_000n).toBeGreaterThan(ACTUAL_FILL); // unreachable
+  });
+
+  it("converges on spot as the trade shrinks relative to depth", () => {
+    const tiny = T_RESERVE / 100_000n; // 0.001% of depth
+    const out = clmmAmountOut(tiny, T_RESERVE, Q_RESERVE, 0n);
+    const spot = (tiny * Q_RESERVE) / T_RESERVE;
+    const diff = spot > out ? spot - out : out - spot;
+    expect(Number((diff * 1_000_000n) / spot)).toBeLessThan(100); // < 0.01%
+  });
+
+  it("applies the LP fee to the input, as v4 does", () => {
+    const withFee = clmmAmountOut(10n ** 24n, T_RESERVE, Q_RESERVE, 100n);
+    const noFee = clmmAmountOut(10n ** 24n, T_RESERVE, Q_RESERVE, 0n);
+    expect(withFee).toBeLessThan(noFee);
+  });
+
+  it("returns 0 rather than dividing by zero on an empty reserve", () => {
+    expect(clmmAmountOut(10n ** 18n, 0n, Q_RESERVE, 100n)).toBe(0n);
+    expect(clmmAmountOut(10n ** 18n, T_RESERVE, 0n, 100n)).toBe(0n);
+    expect(clmmAmountOut(0n, T_RESERVE, Q_RESERVE, 100n)).toBe(0n);
   });
 });

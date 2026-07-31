@@ -12,6 +12,12 @@
  * So a non-crossing curve trade is priced exactly (the math here mirrors
  * `LaunchCurve`) and gets a tight band, while a crossing buy or a graduated pool is an
  * approximation and gets a wider one. `TradeQuote.exact` says which you got.
+ *
+ * Approximate does not mean impact-free: a graduated pool is priced against its real
+ * reserves, because a launch graduates with only `B` of quote behind it and a large exit
+ * is a majority-impact trade there. Quoting such a pool off spot produces a slippage
+ * bound the router cannot satisfy, which presents to the user as an unsellable position
+ * rather than as a bad price.
  */
 import { encodeFunctionData, type Address, type Hex } from "viem";
 import { readContract } from "viem/actions";
@@ -19,6 +25,7 @@ import { erc20Abi, rallyHookAbi, rallyRouterAbi, uniswapV3PoolAbi } from "./abis
 import { RallyError } from "./errors";
 import { poolIdFor, poolKeyFor, sortCurrencies, V4, type PoolKey } from "./pool";
 import {
+  clmmAmountOut,
   curveFeeBps,
   initCurve,
   previewBuy,
@@ -50,9 +57,11 @@ const PHASES: Phase[] = ["NONE", "CURVE", "GRADUATED"];
  */
 export const EXACT_SLIPPAGE_BPS = 100n;
 /**
- * 5% — the estimate is approximate: a graduation-crossing buy, or a graduated pool
- * priced off `poolPriceWad`, which models no CLMM slippage at all. A tight bound there
- * reverts honest trades.
+ * 5% — the estimate is approximate: a graduation-crossing buy, or a graduated pool. Both
+ * carry their own price impact now (see {clmmAmountOut}), so this is no longer covering
+ * for an estimate that ignored slippage entirely; it absorbs other traders moving the pool
+ * between quote and inclusion, plus the small residual from modelling a finite-range
+ * position as a constant product.
  */
 export const APPROX_SLIPPAGE_BPS = 500n;
 
@@ -188,9 +197,10 @@ export interface QuoteTradeParams {
  * Price a trade off the curve, with no RPC beyond the state already read.
  *
  * During CURVE this reproduces `LaunchCurve` exactly. Post-graduation the curve prices
- * nothing, so the estimate is a straight line off `poolPriceWad` — it ignores CLMM
- * slippage entirely, which is exactly why it is marked `exact: false` and bounded at
- * the wider tolerance.
+ * nothing, so the estimate comes from the locked position's own reserves via
+ * {clmmAmountOut} — which means it includes the trade's price impact. It stays
+ * `exact: false` (a full-range position is not precisely `xy = k`) and keeps the wider
+ * tolerance, but the number shown is now the number the pool will actually pay.
  */
 export function quoteTrade(
   launch: LaunchState,
@@ -232,18 +242,32 @@ export function quoteTrade(
     crossesGraduation = preview.crossesGraduation;
     exact = !preview.crossesGraduation;
   } else {
-    // Graduated: straight line off the last pool price.
-    const price = launch.poolPriceWad;
-    if (price <= 0n) {
+    // Graduated: price against the locked position's real reserves, so the estimate
+    // carries the trade's own price impact. See {clmmAmountOut} for why spot is not
+    // usable here — a graduated pool holds only `B` of quote, so an exit sized like a
+    // creator's stack moves the price a long way, and a bound derived from spot is
+    // simply unreachable.
+    const { quote: quoteReserve, token: tokenReserve } = launch.reserves;
+    if (quoteReserve <= 0n || tokenReserve <= 0n) {
       throw new RallyError(
         "NO_PRICE",
-        `No price available for ${launch.token} — the pool has graduated but reports a ` +
-          `zero price. Refusing to quote a trade that cannot be bounded.`,
-        { details: { token: launch.token, phase: launch.phase } },
+        `No liquidity available for ${launch.token} — the pool has graduated but reports ` +
+          `an empty reserve (quote ${quoteReserve}, token ${tokenReserve}). Refusing to ` +
+          `quote a trade that cannot be bounded.`,
+        {
+          details: {
+            token: launch.token,
+            phase: launch.phase,
+            quoteReserve,
+            tokenReserve,
+          },
+        },
       );
     }
-    const scale = scaleFor(launch.quote.decimals);
-    amountOut = side === "buy" ? (amountIn * scale) / price : (amountIn * price) / scale;
+    amountOut =
+      side === "buy"
+        ? clmmAmountOut(amountIn, quoteReserve, tokenReserve, params.poolFeeBps)
+        : clmmAmountOut(amountIn, tokenReserve, quoteReserve, params.poolFeeBps);
   }
 
   const priceWad = curve
