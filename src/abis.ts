@@ -75,7 +75,6 @@ export const rallyHookAbi = parseAbi([
   // The fee-exempt creator first buy. It emits no v4 `Swap` (v4 skips a hook's own
   // `beforeSwap` on a self-call), so this is the only log for an `initialBuy` fill —
   // parse it to report what the creator actually received.
-  "event FirstBuy(bytes32 indexed pid, address indexed buyer, int128 amount0, int128 amount1, uint160 sqrtPriceX96, int24 tick)",
   "event CreatorFeesAccrued(bytes32 indexed pid, address indexed creator, uint256 amount)",
   "event CreatorFeesClaimed(bytes32 indexed pid, address indexed creator, uint256 amount)",
 ]);
@@ -125,6 +124,16 @@ export const erc20Abi = parseAbi([
 ]);
 
 /** The two reads the SDK uses to prove a v3 pool really is the wETH/quote pair. */
+/**
+ * The one v4 PoolManager event the SDK reads: the creator's first buy at launch is an
+ * ordinary swap placed by the factory, so this is where its filled amounts live. (The hook
+ * cannot place it itself — v4 skips a hook's own `beforeSwap` on a self-call — which is why
+ * there is no bespoke launch event to read instead.)
+ */
+export const poolManagerAbi = parseAbi([
+  "event Swap(bytes32 indexed id, address indexed sender, int128 amount0, int128 amount1, uint160 sqrtPriceX96, uint128 liquidity, int24 tick, uint24 fee)",
+]);
+
 export const uniswapV3PoolAbi = parseAbi([
   "function token0() view returns (address)",
   "function token1() view returns (address)",

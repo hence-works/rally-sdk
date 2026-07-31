@@ -38,6 +38,7 @@ export { DEPLOYMENTS } from "./deployments";
 export {
   erc20Abi,
   rallyFactoryAbi,
+  poolManagerAbi,
   rallyHookAbi,
   rallyParamRegistryAbi,
   rallyRouterAbi,

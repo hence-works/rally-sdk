@@ -19,7 +19,7 @@ import {
   type TransactionReceipt,
 } from "viem";
 import { readContract } from "viem/actions";
-import { erc20Abi, rallyFactoryAbi, rallyHookAbi } from "./abis";
+import { erc20Abi, poolManagerAbi, rallyFactoryAbi, rallyHookAbi } from "./abis";
 import { RallyError } from "./errors";
 import { mineVanitySalt } from "./mine";
 import { poolIdOf } from "./pool";
@@ -450,13 +450,18 @@ export async function prepareLaunch(
 const MAX_UINT256 = (1n << 256n) - 1n;
 
 /**
- * Parse a confirmed launch receipt. `Launched` is emitted by the HOOK, not the
- * factory — a pool's whole log stream has one source address — so that is what is
- * matched here.
+ * Parse a confirmed launch receipt. `Launched` is emitted by the HOOK, not the factory — a
+ * pool's whole log stream has one source address — so that is what is matched here.
+ *
+ * The creator's first buy is read from the v4 `Swap` the PoolManager emits for it. It is an
+ * ordinary swap placed by the factory: the hook cannot place it itself, because v4 skips a
+ * hook's own `beforeSwap` on a self-call and the swap would bypass the curve entirely. Pass
+ * `poolManager` to have `firstBuyTokens` populated; omit it and the field is simply absent.
  */
 export function parseLaunchReceipt(
   receipt: TransactionReceipt,
   hook: Address,
+  poolManager?: Address,
 ): Omit<LaunchResult, "receipt" | "transactionHash"> {
   if (receipt.status !== "success") {
     // A reverted transaction is still mined and still returns a receipt, so inclusion
@@ -469,8 +474,24 @@ export function parseLaunchReceipt(
   let launched: LaunchResult | undefined;
   let firstBuyTokens: bigint | undefined;
 
+  // Collected in a second pass: the `Swap` may precede `Launched` in log order only if the
+  // hook's ordering guarantee is ever broken, but matching on `pid` needs `launched` first.
+  const swaps: { id: Hex; amount0: bigint; amount1: bigint }[] = [];
+
   for (const log of receipt.logs) {
-    if (log.address.toLowerCase() !== hook.toLowerCase()) continue;
+    const from = log.address.toLowerCase();
+    if (poolManager !== undefined && from === poolManager.toLowerCase()) {
+      try {
+        const d = decodeEventLog({ abi: poolManagerAbi, data: log.data, topics: log.topics });
+        if (d.eventName === "Swap") {
+          swaps.push({ id: d.args.id, amount0: d.args.amount0, amount1: d.args.amount1 });
+        }
+      } catch {
+        // an unrelated PoolManager event
+      }
+      continue;
+    }
+    if (from !== hook.toLowerCase()) continue;
     let decoded;
     try {
       decoded = decodeEventLog({ abi: rallyHookAbi, data: log.data, topics: log.topics });
@@ -487,12 +508,6 @@ export function parseLaunchReceipt(
         gradThreshold: a.gradThreshold,
         metadataURI: a.metadataURI,
       } as LaunchResult;
-    } else if (decoded.eventName === "FirstBuy") {
-      // Swapper-perspective, currency-ordered: the positive leg is what the creator
-      // received, which for a first buy is always the token side.
-      const { amount0, amount1 } = decoded.args;
-      const received = amount0 > 0n ? amount0 : amount1;
-      if (received > 0n) firstBuyTokens = received;
     }
   }
 
@@ -504,6 +519,14 @@ export function parseLaunchReceipt(
       { details: { hook, transactionHash: receipt.transactionHash } },
     );
   }
+  // v4 deltas are swapper-perspective and currency-ordered, so the positive leg is what
+  // the creator received — for a buy, always the token side.
+  for (const s of swaps) {
+    if (s.id !== launched.pid) continue;
+    const received = s.amount0 > 0n ? s.amount0 : s.amount1;
+    if (received > 0n) firstBuyTokens = received;
+  }
+
   return firstBuyTokens === undefined ? launched : { ...launched, firstBuyTokens };
 }
 
