@@ -253,19 +253,19 @@ export function createRallyClient(config: RallyClientConfig) {
 
       step("confirming");
       const receipt = await waitForTransactionReceipt(publicClient, { hash });
-      const parsed = parseLaunchReceipt(receipt, addresses.launchHook, addresses.poolManager);
+      const parsed = parseLaunchReceipt(receipt, addresses.launchHook, addresses.rallyFactory);
       return { ...parsed, transactionHash: hash, receipt, prepared };
     },
 
     /** Parse a launch receipt you submitted yourself. */
     parseLaunchReceipt(receipt: TransactionReceipt) {
-      return parseLaunchReceipt(receipt, addresses.launchHook, addresses.poolManager);
+      return parseLaunchReceipt(receipt, addresses.launchHook, addresses.rallyFactory);
     },
 
     /** Wait for a launch transaction and parse it. */
     async waitForLaunch(hash: Hex): Promise<LaunchResult> {
       const receipt = await waitForTransactionReceipt(publicClient, { hash });
-      return { ...parseLaunchReceipt(receipt, addresses.launchHook, addresses.poolManager), transactionHash: hash, receipt };
+      return { ...parseLaunchReceipt(receipt, addresses.launchHook, addresses.rallyFactory), transactionHash: hash, receipt };
     },
 
     /** Front-load the SIWE prompt (hosted pinner only), so it isn't mid-launch. */

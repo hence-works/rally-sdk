@@ -43,6 +43,11 @@ export const rallyFactoryAbi = parseAbi([
   "function hook() view returns (address)",
   "function weth() view returns (address)",
   "function registry() view returns (address)",
+  // The creator's fee-exempt first buy, as a fill. The v4 `Swap` this buy also produces
+  // reports NOTHING: a curve-phase fill is answered entirely by the hook's
+  // `BeforeSwapDelta`, so v4 moves no liquidity and emits `Swap` with both legs zero.
+  // Same sign convention and currency ordering as `RallySwap`.
+  "event FirstBuy(bytes32 indexed pid, address indexed buyer, int128 amount0, int128 amount1, uint160 sqrtPriceX96, int24 tick)",
 ]);
 
 /**

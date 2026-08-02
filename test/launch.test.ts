@@ -78,6 +78,80 @@ describe("parseLaunchReceipt", () => {
     const receipt = { status: "success", logs: [], transactionHash: keccak256(toHex("x")) };
     expect(() => parseLaunchReceipt(receipt as never, HOOK)).toThrow(/No Launched event/);
   });
+
+  // The first buy's amounts come from `RallyFactory.FirstBuy` and from nowhere else. The
+  // v4 `Swap` the same buy triggers has BOTH legs zero — a curve fill is answered entirely
+  // by the hook's `BeforeSwapDelta`, so v4 moves no liquidity — which is why reading the
+  // `Swap` left `firstBuyTokens` permanently undefined.
+  const FACTORY: Address = "0xB237b78903C12B34F6cf099cf5ef701EF158BFE5";
+  const POOL_MANAGER: Address = "0xE03A1074c86CFeDd5C142C4F04F1a1536e203543";
+  const PID = keccak256(toHex("pid"));
+  const TOKEN: Address = "0x1f60EBa664cb43348a91a50dbcACAE0aDD7a595f";
+  const CREATOR: Address = "0xAebC4577f2DB3A819448d8e1779cfA851B5dbac0";
+  const WETH: Address = "0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14";
+
+  /** wETH < token here, so currency0 is the quote: creator pays leg0, receives leg1. */
+  const SPENT = 1_000_000_000_000_000_000n;
+  const RECEIVED = 4_200_000_000_000_000_000_000n;
+
+  function receiptWith(logs: unknown[]) {
+    return { status: "success", logs, transactionHash: keccak256(toHex("x")) } as never;
+  }
+
+  it("reads the first buy from FirstBuy, not from the zero-legged v4 Swap", async () => {
+    const { encodeAbiParameters, encodeEventTopics, parseAbiParameters } = await import("viem");
+    const { rallyFactoryAbi, rallyHookAbi, poolManagerAbi } = await import("../src/abis");
+
+    const logs = [
+      {
+        address: HOOK,
+        topics: encodeEventTopics({
+          abi: rallyHookAbi,
+          eventName: "Launched",
+          args: { pid: PID, token: TOKEN, creator: CREATOR },
+        }),
+        data: encodeAbiParameters(parseAbiParameters("address, uint256, string"), [
+          WETH,
+          5_000_000_000_000_000_000n,
+          "ipfs://meta",
+        ]),
+      },
+      // The v4 Swap the first buy triggers: real, and structurally empty.
+      {
+        address: POOL_MANAGER,
+        topics: encodeEventTopics({
+          abi: poolManagerAbi,
+          eventName: "Swap",
+          args: { id: PID, sender: FACTORY },
+        }),
+        data: encodeAbiParameters(
+          parseAbiParameters("int128, int128, uint160, uint128, int24, uint24"),
+          [0n, 0n, 79228162514264337593543950336n, 0n, 0, 0],
+        ),
+      },
+      {
+        address: FACTORY,
+        topics: encodeEventTopics({
+          abi: rallyFactoryAbi,
+          eventName: "FirstBuy",
+          args: { pid: PID, buyer: CREATOR },
+        }),
+        data: encodeAbiParameters(parseAbiParameters("int128, int128, uint160, int24"), [
+          -SPENT,
+          RECEIVED,
+          79228162514264337593543950336n,
+          0,
+        ]),
+      },
+    ];
+
+    const parsed = parseLaunchReceipt(receiptWith(logs), HOOK, FACTORY);
+    expect(parsed.token).toBe(TOKEN);
+    expect(parsed.firstBuyTokens).toBe(RECEIVED);
+
+    // Without the factory there is nothing to read it from — the Swap cannot supply it.
+    expect(parseLaunchReceipt(receiptWith(logs), HOOK).firstBuyTokens).toBeUndefined();
+  });
 });
 
 describe("slippage bounds", () => {
