@@ -11,7 +11,16 @@ import { readContract } from "viem/actions";
 import { rallyParamRegistryAbi } from "./abis";
 import type { CurveParams, FeePolicy, PublicClientLike } from "./types";
 
-/** `RallyParamRegistry.Key` ordinals. Append-only — never reorder. */
+/**
+ * `RallyParamRegistry.Key` ordinals. Append-only — never reorder.
+ *
+ * **Renumbered once, breaking.** The two dead `CURVE_CREATOR_SHARE_*` keys that sat at
+ * 8 and 9 were deleted from the enum, moving everything below them down by two
+ * (`PLATFORM_FEE_BPS` 10 → 8 … `FLUSH_MAX_RESERVE_BPS` 19 → 17). These numbers are only
+ * valid against a registry deployed from that revision or later: read an older
+ * deployment with them and you get a different parameter back, with no revert — every
+ * ordinal in range is a valid key. Check which registry a chain runs before upgrading.
+ */
 export const REGISTRY_KEYS = {
   LAUNCH_FEE: 0,
   TOTAL_SUPPLY: 1,
@@ -22,18 +31,16 @@ export const REGISTRY_KEYS = {
   /** Anti-snipe decay window, seconds (25% → 1% over ~10m at defaults). */
   CURVE_FEE_DECAY: 6,
   POOL_FEE_BPS: 7,
-  CURVE_CREATOR_SHARE_START_BPS: 8,
-  CURVE_CREATOR_SHARE_END_BPS: 9,
-  PLATFORM_FEE_BPS: 10,
-  CREATOR_CAP_BPS: 11,
-  BUYBACK_MAX_SLIPPAGE_BPS: 12,
+  PLATFORM_FEE_BPS: 8,
+  CREATOR_CAP_BPS: 9,
+  BUYBACK_MAX_SLIPPAGE_BPS: 10,
   /** bit0 dividend, bit1 buyback, bit2 lp-support. */
-  MECHANISM_ENABLE_MASK: 13,
-  AUTO_FLUSH_MIN_BPS: 14,
-  DEFAULT_CREATOR_BPS: 15,
-  DEFAULT_DIVIDEND_BPS: 16,
-  DEFAULT_BUYBACK_BPS: 17,
-  DEFAULT_LP_SUPPORT_BPS: 18,
+  MECHANISM_ENABLE_MASK: 11,
+  AUTO_FLUSH_MIN_BPS: 12,
+  DEFAULT_CREATOR_BPS: 13,
+  DEFAULT_DIVIDEND_BPS: 14,
+  DEFAULT_BUYBACK_BPS: 15,
+  DEFAULT_LP_SUPPORT_BPS: 16,
   /**
    * Cap on one fee-funded mechanism self-swap, as bps of the graduated pool's depth.
    * Bounds each buyback / lp-support / token-conversion flush against live depth rather
@@ -41,7 +48,7 @@ export const REGISTRY_KEYS = {
    * flushes instead of exceeding the slippage bound forever. Reads back 0 on a registry
    * deployed before this key existed, which the hook treats as its safe default (100).
    */
-  FLUSH_MAX_RESERVE_BPS: 19,
+  FLUSH_MAX_RESERVE_BPS: 17,
 } as const;
 
 export type RegistryKey = (typeof REGISTRY_KEYS)[keyof typeof REGISTRY_KEYS];
