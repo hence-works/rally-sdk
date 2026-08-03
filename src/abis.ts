@@ -40,6 +40,16 @@ export const rallyFactoryAbi = parseAbi([
   // Per-quote config: the launch fee F and graduation threshold B in that quote's own
   // base units, plus its decimals. Governance-tunable — always read, never assume.
   "function quotes(address quote) view returns (bool allowed, uint8 decimals, uint256 gradThreshold, uint256 launchFee, uint256 scale)",
+  // `quotes` is a mapping and so tells you nothing you did not already know the key for.
+  // This is the enumeration: every quote ever registered, in registration order.
+  //
+  // APPEND-ONLY, and it deliberately keeps quotes governance has since disabled — pools
+  // launched while a quote was allowed keep trading on it. So filter on `quotes(q).allowed`
+  // before offering one as a launch option; do NOT treat presence here as permission.
+  "function allQuotes() view returns (address[])",
+  "function quoteCount() view returns (uint256)",
+  "function quoteList(uint256 index) view returns (address)",
+  "event QuoteRegistered(address indexed quote)",
   "function hook() view returns (address)",
   "function weth() view returns (address)",
   "function registry() view returns (address)",
@@ -66,9 +76,14 @@ export const rallyHookAbi = parseAbi([
   "function poolReserves(bytes32 pid) view returns (uint256 quoteReserve, uint256 tokenReserve)",
   "function feeConfigOf(bytes32 pid) view returns ((uint16 creatorBps, uint16 dividendBps, uint16 buybackBps, uint16 lpSupportBps))",
   "function gradLiquidity(bytes32 pid) view returns (uint128)",
+  // Complete and current in both phases: every fee is split into this balance by the trade
+  // that earned it, so there is nothing uncollected for it to omit.
   "function creatorFees(bytes32 pid) view returns (uint256)",
-  // Non-view on-chain (it collects through an `unlock`), declared view because the SDK
-  // only ever eth_calls it. Never send it as a transaction — use `pokeFees` for that.
+  // Identical to `creatorFees`, and genuinely `view` on-chain now. It used to be
+  // state-mutating — it ran a poke first, because post-graduation fees were only realized
+  // on collection — and this fragment deliberately mis-declared it as `view` so callers
+  // would eth_call rather than send it. That workaround is no longer needed; prefer
+  // `creatorFees` in new code.
   "function previewCreatorFees(bytes32 pid) view returns (uint256)",
   "function claimCreatorFees(bytes32 pid) returns (uint256 amount)",
   "function pokeFees(bytes32 pid)",

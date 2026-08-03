@@ -171,8 +171,16 @@ export function grossUpForFee(net: bigint, feeBps: bigint): bigint {
  * mislead the UI — the slippage bound derived from it is unreachable, so the router
  * rejects the swap with `InsufficientOutput` and the position looks unsellable.
  *
- * v4 takes the LP fee off the INPUT of an exact-input swap, so the fee is applied before
- * the invariant, matching `Pool.swap`.
+ * The fee is NOT the pool's own LP fee — the graduated pool charges zero. `POOL_FEE_BPS`
+ * is taken by the HOOK, and always denominated in the launch's QUOTE, so which side of the
+ * invariant it lands on depends on the direction:
+ *
+ *   - BUY  (quote in):  `beforeSwap` takes it off the input, so the pool sees only the net.
+ *     Same shape as a v3/v4 LP fee, which is why this used to be direction-agnostic.
+ *   - SELL (quote out): the whole token input reaches the pool, and `afterSwap` takes the
+ *     cut off the realized quote output. Applying it to the input instead is wrong — the
+ *     two agree to first order but diverge with price impact, which is exactly the regime
+ *     this function exists to model.
  *
  * Accurate to well under a tenth of a percent against a live pool. It is not exact: the
  * range is finite rather than truly `(0, ∞)`, so the reserves imply a slightly different
@@ -180,22 +188,30 @@ export function grossUpForFee(net: bigint, feeBps: bigint): bigint {
  * `exact: false` and keeps the wider tolerance — which now absorbs other traders moving
  * the pool between quote and inclusion, its actual job.
  *
- * @param reserveIn  reserve of the leg being paid in, base units.
- * @param reserveOut reserve of the leg being received, base units.
- * @param poolFeeBps the graduated pool's LP fee (POOL_FEE_BPS).
+ * @param reserveIn    reserve of the leg being paid in, base units.
+ * @param reserveOut   reserve of the leg being received, base units.
+ * @param swapFeeBps   the hook's post-graduation fee (POOL_FEE_BPS).
+ * @param quoteIsInput true for a buy (fee off the input), false for a sell (off the
+ *                     output). Required rather than defaulted: a caller who guesses gets a
+ *                     silently wrong number instead of a type error.
  */
 export function clmmAmountOut(
   amountIn: bigint,
   reserveIn: bigint,
   reserveOut: bigint,
-  poolFeeBps: bigint,
+  swapFeeBps: bigint,
+  quoteIsInput: boolean,
 ): bigint {
   if (amountIn <= 0n || reserveIn <= 0n || reserveOut <= 0n) return 0n;
-  const fee = poolFeeBps >= BPS ? BPS - 1n : poolFeeBps < 0n ? 0n : poolFeeBps;
-  const inAfterFee = (amountIn * (BPS - fee)) / BPS;
-  if (inAfterFee <= 0n) return 0n;
-  // Floor, so the estimate never sits above what the pool would actually pay.
-  return (reserveOut * inAfterFee) / (reserveIn + inAfterFee);
+  const fee = swapFeeBps >= BPS ? BPS - 1n : swapFeeBps < 0n ? 0n : swapFeeBps;
+  if (quoteIsInput) {
+    const inAfterFee = (amountIn * (BPS - fee)) / BPS;
+    if (inAfterFee <= 0n) return 0n;
+    // Floor, so the estimate never sits above what the pool would actually pay.
+    return (reserveOut * inAfterFee) / (reserveIn + inAfterFee);
+  }
+  const gross = (reserveOut * amountIn) / (reserveIn + amountIn);
+  return gross - (gross * fee) / BPS;
 }
 
 /** Governance params driving the §4.2 anti-snipe fee decay. */

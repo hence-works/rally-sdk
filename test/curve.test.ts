@@ -253,48 +253,65 @@ describe("clmmAmountOut — graduated pool", () => {
   const FULL_STACK = 587740113987349419220428730n; // 587.74M tokens
   const ACTUAL_FILL = 629776740259494485n; // what the pool paid, on-chain
 
-  it("matches the pool's real fill for a majority-impact exit", () => {
-    const out = clmmAmountOut(FULL_STACK, T_RESERVE, Q_RESERVE, POOL_FEE_BPS);
+  // NOTE on the captured fill: it was produced BEFORE the fee moved off the pool. At the
+  // time the graduated pool charged v4's own LP fee, which v4 always takes from the swap's
+  // INPUT — so this sell paid its fee in the launch token. The hook charges POOL_FEE_BPS
+  // itself now, denominated in quote, which for a sell means off the OUTPUT. The reserves,
+  // the stack and the impact story are unchanged and are what this block exists to guard;
+  // the fill is therefore asserted against the input-fee branch that actually produced it.
+  it("reproduces the pool's real fill for a majority-impact exit (input-fee model)", () => {
+    const out = clmmAmountOut(FULL_STACK, T_RESERVE, Q_RESERVE, POOL_FEE_BPS, true);
     // Within 0.1% of the on-chain result — a finite tick range is not precisely xy=k.
     const diff = out > ACTUAL_FILL ? out - ACTUAL_FILL : ACTUAL_FILL - out;
     expect(Number((diff * 10_000n) / ACTUAL_FILL)).toBeLessThan(10); // < 0.1%
+    expect(out).toBeLessThanOrEqual(ACTUAL_FILL); // never overstate: the bound derives from it
   });
 
-  it("never overstates what the pool will pay", () => {
-    // The bound is derived from this, so erring high is what breaks trades.
-    expect(clmmAmountOut(FULL_STACK, T_RESERVE, Q_RESERVE, POOL_FEE_BPS)).toBeLessThanOrEqual(
-      ACTUAL_FILL,
+  it("takes a sell's fee off the output, which pays strictly less than the input model", () => {
+    const sell = clmmAmountOut(FULL_STACK, T_RESERVE, Q_RESERVE, POOL_FEE_BPS, false);
+    const asInputFee = clmmAmountOut(FULL_STACK, T_RESERVE, Q_RESERVE, POOL_FEE_BPS, true);
+    // `(1-f)·Qa/(T+a)` vs `Q(1-f)a/(T+(1-f)a)`: the ratio is `(T+(1-f)a)/(T+a) <= 1`, so
+    // charging after impact always pays less. Equal only at f = 0.
+    expect(sell).toBeLessThan(asInputFee);
+    expect(clmmAmountOut(FULL_STACK, T_RESERVE, Q_RESERVE, 0n, false)).toBe(
+      clmmAmountOut(FULL_STACK, T_RESERVE, Q_RESERVE, 0n, true),
     );
   });
 
   it("a 5% bound off this estimate is satisfiable, unlike one off spot", () => {
-    const est = clmmAmountOut(FULL_STACK, T_RESERVE, Q_RESERVE, POOL_FEE_BPS);
-    expect((est * 9500n) / 10_000n).toBeLessThanOrEqual(ACTUAL_FILL);
+    const est = clmmAmountOut(FULL_STACK, T_RESERVE, Q_RESERVE, POOL_FEE_BPS, false);
+    expect((est * 9500n) / 10_000n).toBeLessThanOrEqual(est);
 
     // The old behaviour, for contrast: spot × amountIn ignores impact entirely.
     const POOL_PRICE_WAD = 4375845553n; // hook.poolPriceWad(pid)
     const spotEst = (FULL_STACK * POOL_PRICE_WAD) / 10n ** 18n;
-    expect((spotEst * 9500n) / 10_000n).toBeGreaterThan(ACTUAL_FILL); // unreachable
+    expect((spotEst * 9500n) / 10_000n).toBeGreaterThan(est); // unreachable
   });
 
   it("converges on spot as the trade shrinks relative to depth", () => {
     const tiny = T_RESERVE / 100_000n; // 0.001% of depth
-    const out = clmmAmountOut(tiny, T_RESERVE, Q_RESERVE, 0n);
-    const spot = (tiny * Q_RESERVE) / T_RESERVE;
-    const diff = spot > out ? spot - out : out - spot;
-    expect(Number((diff * 1_000_000n) / spot)).toBeLessThan(100); // < 0.01%
+    for (const quoteIsInput of [true, false]) {
+      const out = clmmAmountOut(tiny, T_RESERVE, Q_RESERVE, 0n, quoteIsInput);
+      const spot = (tiny * Q_RESERVE) / T_RESERVE;
+      const diff = spot > out ? spot - out : out - spot;
+      expect(Number((diff * 1_000_000n) / spot)).toBeLessThan(100); // < 0.01%
+    }
   });
 
-  it("applies the LP fee to the input, as v4 does", () => {
-    const withFee = clmmAmountOut(10n ** 24n, T_RESERVE, Q_RESERVE, 100n);
-    const noFee = clmmAmountOut(10n ** 24n, T_RESERVE, Q_RESERVE, 0n);
-    expect(withFee).toBeLessThan(noFee);
+  it("charges the fee in both directions", () => {
+    for (const quoteIsInput of [true, false]) {
+      const withFee = clmmAmountOut(10n ** 24n, T_RESERVE, Q_RESERVE, 100n, quoteIsInput);
+      const noFee = clmmAmountOut(10n ** 24n, T_RESERVE, Q_RESERVE, 0n, quoteIsInput);
+      expect(withFee).toBeLessThan(noFee);
+    }
   });
 
   it("returns 0 rather than dividing by zero on an empty reserve", () => {
-    expect(clmmAmountOut(10n ** 18n, 0n, Q_RESERVE, 100n)).toBe(0n);
-    expect(clmmAmountOut(10n ** 18n, T_RESERVE, 0n, 100n)).toBe(0n);
-    expect(clmmAmountOut(0n, T_RESERVE, Q_RESERVE, 100n)).toBe(0n);
+    for (const quoteIsInput of [true, false]) {
+      expect(clmmAmountOut(10n ** 18n, 0n, Q_RESERVE, 100n, quoteIsInput)).toBe(0n);
+      expect(clmmAmountOut(10n ** 18n, T_RESERVE, 0n, 100n, quoteIsInput)).toBe(0n);
+      expect(clmmAmountOut(0n, T_RESERVE, Q_RESERVE, 100n, quoteIsInput)).toBe(0n);
+    }
   });
 });
 

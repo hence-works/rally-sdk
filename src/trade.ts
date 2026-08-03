@@ -270,10 +270,12 @@ export function quoteTrade(
         },
       );
     }
+    // The hook's post-graduation fee is always quote-denominated, so it comes off the
+    // INPUT on a buy and off the OUTPUT on a sell — hence the direction flag.
     amountOut =
       side === "buy"
-        ? clmmAmountOut(amountIn, quoteReserve, tokenReserve, params.poolFeeBps)
-        : clmmAmountOut(amountIn, tokenReserve, quoteReserve, params.poolFeeBps);
+        ? clmmAmountOut(amountIn, quoteReserve, tokenReserve, params.poolFeeBps, true)
+        : clmmAmountOut(amountIn, tokenReserve, quoteReserve, params.poolFeeBps, false);
   }
 
   const priceWad = curve
