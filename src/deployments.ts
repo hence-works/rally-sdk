@@ -16,6 +16,8 @@ export const DEPLOYMENTS: Record<number, RallyAddresses> = {
     rallyFactory: "0x0000000000000000000000000000000000000000",
     rallyRouter: "0x0000000000000000000000000000000000000000",
     dividendDistributor: undefined,
+    rallyVault: undefined,
+    gachaVault: undefined,
   },
   11155111: {
     chainId: 11155111,
@@ -29,5 +31,7 @@ export const DEPLOYMENTS: Record<number, RallyAddresses> = {
     rallyFactory: "0x2cAbF849c2Ebdb2D071b016271590E96c1697e91",
     rallyRouter: "0x94ce2bC65E252f7c6814BDc36A180D01Dc416CBC",
     dividendDistributor: "0x30fB5BE1F0a85b57D27921C89ba0807aE7D91B7d",
+    rallyVault: "0xCba496B747F2c2C0486DEAaAe28bB93d1F005f5e",
+    gachaVault: undefined,
   },
 };

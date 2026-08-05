@@ -49,6 +49,8 @@ const body = entries
     rallyFactory: ${field(m.RallyFactory)},
     rallyRouter: ${field(m.RallyRouter)},
     dividendDistributor: ${field(m.DividendDistributor)},
+    rallyVault: ${field(m.RallyVault)},
+    gachaVault: ${field(m.GachaVault)},
   },`,
   )
   .join("\n");

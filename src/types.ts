@@ -25,6 +25,16 @@ export interface RallyAddresses {
   rallyFactory?: Address;
   rallyRouter: Address;
   dividendDistributor?: Address;
+  /**
+   * Where the hook sends the platform's fee cut. Absent on a chain deployed against a bare
+   * EOA treasury — permanently, since `treasury` is immutable on both the hook and factory.
+   */
+  rallyVault?: Address;
+  /**
+   * Prize escrow for the daily draw. Additive, so absence means gacha isn't deployed on this
+   * chain rather than anything being wrong.
+   */
+  gachaVault?: Address;
 }
 
 /** Reads only — any viem client with a transport (`createPublicClient`, wagmi's). */
