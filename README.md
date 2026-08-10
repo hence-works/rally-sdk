@@ -63,8 +63,8 @@ prepared.request;  // { to, data, value, chainId } — send it however you like
 await myEthersSigner.sendTransaction(prepared.request);
 ```
 
-`prepareSwap`, `prepareEthBuy` and `prepareLaunch` all work this way. Reads never need
-a wallet at all.
+`prepareSwap`, `prepareSwapExactOut`, `prepareEthBuy` and `prepareLaunch` all work this
+way. Reads never need a wallet at all.
 
 ---
 
@@ -204,14 +204,50 @@ and pays its remainder against a pool that didn't exist when you quoted. A non-c
 curve trade is priced exactly and bounded at 1%; a crossing buy or a graduated pool is
 an approximation and gets 5%. Override with `slippageBps` or `minAmountOut`.
 
-Exact-output works on the curve too:
+### Exact output
+
+Curve phase only, and it has both a quote and a prepared transaction:
 
 ```ts
-const { amountIn, maxAmountIn } = await rally.quoteExactOut(token, {
+const q = await rally.quoteExactOut(token, {
   side: "buy",
   amountOut: 1_000_000n * 10n ** 18n,   // buy exactly 1M tokens
 });
+
+q.amountIn;      // estimated cost, in the input leg's base units
+q.maxAmountIn;   // the ceiling the swap will submit as `amountLimit`
+q.slippageBps;   // tolerance applied to reach it
+
+await rally.swapExactOut(token, {
+  side: "buy",
+  amountOut: 1_000_000n * 10n ** 18n,
+  // maxAmountIn: q.maxAmountIn,   // override the ceiling
+  // payWithEth: true,             // wETH-quoted launches; the router refunds the rest
+});
 ```
+
+`prepareSwapExactOut(token, input)` is the unsigned form, returning
+`{ quote, approval?, request, poolKey, zeroForOne, deadline }` like `prepareSwap`.
+
+Three things flip versus exact input, and the SDK handles all three so hand-rolled
+calldata does not have to:
+
+- `amountSpecified` is **positive**. v4 reads the sign as the direction, so `+amountOut`
+  is what makes the swap exact-output at all.
+- **`amountLimit` reverses meaning**: minimum output on exact input, **maximum input** on
+  exact output. The opt-out value reverses with it. Exact input opts out with `0`; exact
+  output opts out with `type(uint256).max`. Passing `0` on an exact-output swap does not
+  disable the check, it makes it unsatisfiable (every input exceeds 0) and the swap
+  reverts `ExcessiveInput` every time. `prepareSwapExactOut` never emits `0`, and rejects
+  a `maxAmountIn: 0n` override rather than building that transaction.
+- The approval, and a `payWithEth` buy's `msg.value`, cover **`maxAmountIn`**, not the
+  estimate. The router pulls what the swap actually costs up to the limit, so sizing
+  either to `amountIn` fails exactly when the price moved in the direction the bound
+  exists to tolerate. Over-sent ETH is refunded by the router.
+
+An exact-output sell larger than the curve's bonded reserve is rejected locally with
+`INVALID_AMOUNT`; on-chain that is `ExactOutputExceedsReserve`. A graduated launch throws
+`UNSUPPORTED`: pricing it needs a v4 quoter.
 
 ### Paying with ETH
 

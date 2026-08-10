@@ -116,6 +116,7 @@ export {
   curveOf,
   prepareEthBuy,
   prepareSwap,
+  prepareSwapExactOut,
   quoteTrade,
   quoteTradeExactOut,
   resolveLaunch,
@@ -124,8 +125,11 @@ export {
 } from "./trade";
 export type {
   PrepareEthBuyParams,
+  PrepareSwapExactOutParams,
   PrepareSwapParams,
   PreparedSwap,
+  PreparedSwapExactOut,
+  QuoteTradeExactOutParams,
   QuoteTradeParams,
 } from "./trade";
 
@@ -155,6 +159,7 @@ export type {
   RallyAddresses,
   SwapStep,
   TradeQuote,
+  TradeQuoteExactOut,
   TradeSide,
   TxRequest,
   WalletClientLike,

@@ -30,12 +30,16 @@ import { createCache, readCurveParams, readFeePolicy } from "./params";
 import {
   prepareEthBuy as prepareEthBuyInner,
   prepareSwap as prepareSwapInner,
+  prepareSwapExactOut as prepareSwapExactOutInner,
   quoteTrade as quoteTradeInner,
   quoteTradeExactOut as quoteTradeExactOutInner,
   resolveLaunch,
   type PrepareEthBuyParams,
+  type PrepareSwapExactOutParams,
   type PrepareSwapParams,
   type PreparedSwap,
+  type PreparedSwapExactOut,
+  type QuoteTradeExactOutParams,
   type QuoteTradeParams,
 } from "./trade";
 import type {
@@ -47,6 +51,7 @@ import type {
   RallyAddresses,
   SwapStep,
   TradeQuote,
+  TradeQuoteExactOut,
   TxRequest,
   WalletClientLike,
 } from "./types";
@@ -304,8 +309,8 @@ export function createRallyClient(config: RallyClientConfig) {
     /** Price an exact-output trade (curve phase only). */
     async quoteExactOut(
       token: Address,
-      input: Parameters<typeof quoteTradeExactOutInner>[2],
-    ) {
+      input: QuoteTradeExactOutParams,
+    ): Promise<TradeQuoteExactOut> {
       const [launch, params] = await Promise.all([this.getLaunch(token), curveParams()]);
       return quoteTradeExactOutInner(launch, params, input);
     },
@@ -328,6 +333,55 @@ export function createRallyClient(config: RallyClientConfig) {
       const step = input.onStep ?? (() => {});
       step("quoting");
       const prepared = await this.prepareSwap(token, input);
+
+      if (prepared.approval) {
+        step("approving");
+        const approval = await send(prepared.approval);
+        if (approval.receipt.status !== "success") {
+          throw new RallyError("LAUNCH_REVERTED", "The input-token approval reverted.", {
+            details: { transactionHash: approval.hash },
+          });
+        }
+      }
+
+      step("signing");
+      const wallet = requireWallet();
+      const hash = await sendTransaction(wallet, {
+        account: wallet.account!,
+        chain: wallet.chain ?? null,
+        to: prepared.request.to,
+        data: prepared.request.data,
+        value: prepared.request.value,
+      });
+      step("confirming");
+      const receipt = await waitForTransactionReceipt(publicClient, { hash });
+      return { hash, receipt, quote: prepared.quote };
+    },
+
+    /**
+     * Build an unsigned exact-OUTPUT swap ("buy exactly 1M tokens"), plus the approval it
+     * needs, without sending. Curve phase only.
+     */
+    async prepareSwapExactOut(
+      token: Address,
+      input: PrepareSwapExactOutParams,
+    ): Promise<PreparedSwapExactOut> {
+      const [launch, params] = await Promise.all([this.getLaunch(token), curveParams()]);
+      return prepareSwapExactOutInner(publicClient, addresses, launch, params, {
+        trader: input.trader ?? account(),
+        ...input,
+      });
+    },
+
+    /** Buy or sell an exact output: approve if needed, sign, wait. */
+    async swapExactOut(
+      token: Address,
+      input: PrepareSwapExactOutParams & { onStep?: (step: SwapStep) => void },
+    ): Promise<{ hash: Hex; receipt: TransactionReceipt; quote: TradeQuoteExactOut }> {
+      requireWallet();
+      const step = input.onStep ?? (() => {});
+      step("quoting");
+      const prepared = await this.prepareSwapExactOut(token, input);
 
       if (prepared.approval) {
         step("approving");

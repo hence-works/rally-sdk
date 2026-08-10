@@ -205,6 +205,26 @@ export interface TradeQuote {
   phase: Phase;
 }
 
+/**
+ * A priced exact-OUTPUT trade: what a wanted output costs. Curve phase only.
+ *
+ * The mirror image of {TradeQuote}'s bound. Exact-in bounds the output from below
+ * (`minAmountOut`); exact-out bounds the INPUT from above, so `maxAmountIn` is
+ * `amountIn` widened by the tolerance rather than cut by it.
+ */
+export interface TradeQuoteExactOut {
+  /** Estimated input needed, in the input leg's base units. */
+  amountIn: bigint;
+  /** The `amountLimit` a swap built from this quote will submit: a ceiling on the input. */
+  maxAmountIn: bigint;
+  /** Curve fee charged, in quote base units. */
+  feeQuote: bigint;
+  /** True when this buy would bond `b` to `B` and graduate the launch mid-swap. */
+  crossesGraduation: boolean;
+  /** Tolerance applied to reach `maxAmountIn`, bps. */
+  slippageBps: bigint;
+}
+
 /** Progress callbacks for the multi-step one-call helpers. */
 export type LaunchStep =
   | "resolving"
