@@ -204,6 +204,18 @@ and pays its remainder against a pool that didn't exist when you quoted. A non-c
 curve trade is priced exactly and bounded at 1%; a crossing buy or a graduated pool is
 an approximation and gets 5%. Override with `slippageBps` or `minAmountOut`.
 
+On exact input, `0` is the router's **opt-out** from the bound, not a conservative
+default: `_checkLimit` skips the comparison and the swap fills at whatever price it
+lands on. So a trade that prices at zero output throws `INVALID_AMOUNT` rather than
+building an unbounded market order. Pass `minAmountOut: 0n` if you really mean unbounded.
+
+Every prepared swap carries a `deadline`, measured from **chain time** (the latest
+block's timestamp), because that is what the router compares against. A browser clock
+running behind would otherwise put the deadline in the past and revert `DeadlineExpired`
+on every trade from that machine. Set the window with `deadlineSeconds` (default 600),
+or pass an absolute `deadline` to bypass it. `chainDeadline(client, seconds)` is exported
+for calldata you build yourself.
+
 ### Exact output
 
 Curve phase only, and it has both a quote and a prepared transaction:

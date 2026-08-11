@@ -9,6 +9,10 @@
  *   - the allowance and a `payWithEth` buy's `msg.value` must cover `maxAmountIn`, not
  *     the estimate, or the trade fails exactly when the price moved in the direction the
  *     bound exists to tolerate.
+ *
+ * Plus the two ways an exact-INPUT swap can go out unprotected without anyone asking:
+ * a `0` limit, which the router reads as an opt-out rather than as a bound, and a
+ * deadline measured against a clock that is not the chain's.
  */
 import { describe, expect, it } from "vitest";
 import {
@@ -21,7 +25,7 @@ import {
 } from "viem";
 import { erc20Abi, rallyRouterAbi } from "../src/abis";
 import { poolIdFor, poolKeyFor, sortCurrencies } from "../src/pool";
-import { prepareSwapExactOut } from "../src/trade";
+import { DEFAULT_DEADLINE_SECONDS, prepareSwap, prepareSwapExactOut } from "../src/trade";
 import { RallyError } from "../src/errors";
 import type { CurveParams, LaunchState, PublicClientLike, RallyAddresses } from "../src/types";
 
@@ -87,12 +91,39 @@ function launchState(over: Partial<LaunchState> = {}): LaunchState {
   };
 }
 
-/** A client whose only answer is the ERC-20 allowance the prepare path reads. */
-function clientWithAllowance(allowance: bigint): PublicClientLike {
+/** Chain time in the mocks below. Deliberately nowhere near the local clock. */
+const CHAIN_NOW = 1_900_000_000n;
+
+/**
+ * A client answering the two reads a prepare path makes: the ERC-20 allowance, and the
+ * latest block, whose timestamp is what the deadline is measured from.
+ */
+function clientWithAllowance(allowance: bigint, chainNow = CHAIN_NOW): PublicClientLike {
   return createPublicClient({
     transport: custom({
       async request({ method }: { method: string }) {
+        if (method === "eth_getBlockByNumber") {
+          return {
+            number: "0x1",
+            timestamp: `0x${chainNow.toString(16)}`,
+            hash: `0x${"11".repeat(32)}`,
+            parentHash: `0x${"00".repeat(32)}`,
+            transactions: [],
+          };
+        }
         if (method !== "eth_call") throw new Error(`unexpected RPC call: ${method}`);
+        return encodeAbiParameters(parseAbiParameters("uint256"), [allowance]);
+      },
+    }),
+  });
+}
+
+/** A client whose node cannot serve a block header, but can still answer a call. */
+function clientWithoutBlocks(allowance: bigint): PublicClientLike {
+  return createPublicClient({
+    transport: custom({
+      async request({ method }: { method: string }) {
+        if (method !== "eth_call") throw new Error(`node is not serving ${method}`);
         return encodeAbiParameters(parseAbiParameters("uint256"), [allowance]);
       },
     }),
@@ -277,5 +308,92 @@ describe("prepareSwapExactOut", () => {
         payWithEth: true,
       }),
     ).rejects.toThrow(/prepareEthBuy/);
+  });
+});
+
+describe("prepareSwap (exact input)", () => {
+  const BUY = { side: "buy", amountIn: 10n ** 17n, trader: TRADER, atTime: AT_TIME } as const;
+
+  it("submits the quote's minAmountOut as the amountLimit", async () => {
+    const prepared = await prepareSwap(
+      clientWithAllowance(0n),
+      ADDRESSES,
+      launchState(),
+      PARAMS,
+      BUY,
+    );
+
+    const { amountLimit, params } = decodeSwap(prepared.request.data);
+    expect(params.amountSpecified).toBe(-BUY.amountIn); // negative = exact input
+    expect(prepared.quote.minAmountOut > 0n).toBe(true);
+    expect(prepared.quote.minAmountOut < prepared.quote.amountOut).toBe(true);
+    expect(amountLimit).toBe(prepared.quote.minAmountOut);
+  });
+
+  it("refuses to build an unbounded swap when the trade prices at zero output", async () => {
+    // `0` is the router's opt-out on exact-input (_checkLimit skips the comparison), so a
+    // quote that cannot be priced must fail here rather than go out as a market order.
+    await expect(
+      prepareSwap(clientWithAllowance(0n), ADDRESSES, launchState(), PARAMS, {
+        ...BUY,
+        slippageBps: 10_000n,
+      }),
+    ).rejects.toThrow(/slippage bound/);
+  });
+
+  it("still lets a caller opt out of the bound deliberately", async () => {
+    const prepared = await prepareSwap(clientWithAllowance(0n), ADDRESSES, launchState(), PARAMS, {
+      ...BUY,
+      minAmountOut: 0n,
+    });
+    expect(decodeSwap(prepared.request.data).amountLimit).toBe(0n);
+  });
+
+  it("measures the deadline from chain time, not the local clock", async () => {
+    const prepared = await prepareSwap(
+      clientWithAllowance(0n),
+      ADDRESSES,
+      launchState(),
+      PARAMS,
+      BUY,
+    );
+
+    // The router compares against `block.timestamp`. A local clock running behind would
+    // put this in the past and revert DeadlineExpired on every trade from that machine.
+    expect(prepared.deadline).toBe(CHAIN_NOW + BigInt(DEFAULT_DEADLINE_SECONDS));
+    expect(decodeSwap(prepared.request.data).deadline).toBe(prepared.deadline);
+  });
+
+  it("honours deadlineSeconds against chain time", async () => {
+    const prepared = await prepareSwap(clientWithAllowance(0n), ADDRESSES, launchState(), PARAMS, {
+      ...BUY,
+      deadlineSeconds: 120,
+    });
+    expect(prepared.deadline).toBe(CHAIN_NOW + 120n);
+  });
+
+  it("keeps an explicit deadline exactly as passed", async () => {
+    const prepared = await prepareSwap(clientWithAllowance(0n), ADDRESSES, launchState(), PARAMS, {
+      ...BUY,
+      deadline: 42n,
+    });
+    expect(prepared.deadline).toBe(42n);
+  });
+
+  it("falls back to the local clock when the node cannot serve a block", async () => {
+    const prepared = await prepareSwap(
+      clientWithoutBlocks(0n),
+      ADDRESSES,
+      launchState(),
+      PARAMS,
+      BUY,
+    );
+
+    // A node that cannot answer a block header should not be the reason a trade cannot
+    // be built: degrade to the old behaviour rather than throw.
+    const localNow = BigInt(Math.floor(Date.now() / 1000));
+    const expected = localNow + BigInt(DEFAULT_DEADLINE_SECONDS);
+    expect(prepared.deadline >= expected - 5n).toBe(true);
+    expect(prepared.deadline <= expected + 5n).toBe(true);
   });
 });

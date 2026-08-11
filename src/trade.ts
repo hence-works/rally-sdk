@@ -20,7 +20,7 @@
  * rather than as a bad price.
  */
 import { encodeFunctionData, parseAbi, type Address, type Hex } from "viem";
-import { readContract } from "viem/actions";
+import { getBlock, readContract } from "viem/actions";
 import { erc20Abi, rallyHookAbi, rallyRouterAbi, uniswapV3PoolAbi } from "./abis";
 import { RallyError } from "./errors";
 import { poolIdFor, poolKeyFor, sortCurrencies, V4, type PoolKey } from "./pool";
@@ -80,9 +80,50 @@ export function applySlippage(estimate: bigint, bps: bigint): bigint {
   return (estimate * (BPS - bps)) / BPS;
 }
 
-/** A deadline `secondsFromNow` ahead of now, for the router's `deadline` argument. */
-export function swapDeadline(secondsFromNow = 600): bigint {
+/** How far ahead a swap's deadline defaults to, in seconds. */
+export const DEFAULT_DEADLINE_SECONDS = 600;
+
+/**
+ * A deadline `secondsFromNow` ahead of the LOCAL clock, for the router's `deadline`
+ * argument. Prefer {chainDeadline} anywhere a public client is in hand: the router
+ * compares against `block.timestamp`, not against the caller's clock.
+ */
+export function swapDeadline(secondsFromNow = DEFAULT_DEADLINE_SECONDS): bigint {
   return BigInt(Math.floor(Date.now() / 1000) + secondsFromNow);
+}
+
+/**
+ * A deadline `secondsFromNow` ahead of CHAIN time, which is what the router actually
+ * checks (`block.timestamp > deadline` reverts `DeadlineExpired`).
+ *
+ * The local-clock version is wrong on a machine running behind: every trade from that
+ * browser reverts, and nothing on screen connects the failure to the clock. A wallet
+ * embedded in someone else's page is exactly where that is undebuggable, so the one
+ * extra call is worth it. The latest block is at most one block old, which makes the
+ * window a few seconds short rather than a few seconds long.
+ *
+ * Falls back to the local clock when the read fails: a node that cannot serve a block
+ * header should not be the reason a trade cannot be built. Never rejects.
+ */
+export async function chainDeadline(
+  client: PublicClientLike,
+  secondsFromNow = DEFAULT_DEADLINE_SECONDS,
+): Promise<bigint> {
+  try {
+    const block = await getBlock(client, { blockTag: "latest" });
+    return block.timestamp + BigInt(secondsFromNow);
+  } catch {
+    return swapDeadline(secondsFromNow);
+  }
+}
+
+/** A caller's explicit deadline, else `deadlineSeconds` ahead of chain time. */
+function resolveDeadline(
+  client: PublicClientLike,
+  input: { deadline?: bigint; deadlineSeconds?: number },
+): Promise<bigint> {
+  if (input.deadline !== undefined) return Promise.resolve(input.deadline);
+  return chainDeadline(client, input.deadlineSeconds);
 }
 
 /**
@@ -374,10 +415,16 @@ export function quoteTradeExactOut(
 export interface PrepareSwapParams extends QuoteTradeParams {
   /** The trader. Needed only to check the allowance for the input leg. */
   trader?: Address;
-  /** Override the computed `amountLimit` (the router's slippage bound). */
+  /**
+   * Override the computed `amountLimit` (the router's slippage bound). `0n` is an
+   * explicit opt-out: exact-input's `_checkLimit` skips the comparison entirely, so the
+   * swap goes out unbounded. Leave it unset to bound the trade from the quote.
+   */
   minAmountOut?: bigint;
-  /** Unix-seconds deadline. Defaults to 10 minutes out. */
+  /** Unix-seconds deadline. Defaults to `deadlineSeconds` ahead of chain time. */
   deadline?: bigint;
+  /** Window for the default deadline, in seconds. Defaults to 10 minutes. */
+  deadlineSeconds?: number;
   /**
    * Fund a wETH-quoted buy with native ETH (`msg.value`, wrapped by the router and the
    * remainder refunded) instead of a wETH allowance. Defaults to false — pass true
@@ -432,6 +479,26 @@ export async function prepareSwap(
     );
   }
 
+  // The bound the router will enforce on the output leg. `0` is not a conservative
+  // default here, it is the opt-out: `_checkLimit` skips the comparison on exact-input,
+  // so the swap executes at whatever price it lands on. `quote.minAmountOut` is 0
+  // whenever the estimate is (see {applySlippage}), which makes an unbounded market
+  // order reachable from an unpriceable quote rather than from anyone asking for one.
+  const amountLimit = input.minAmountOut ?? quote.minAmountOut;
+  if (amountLimit === 0n && input.minAmountOut === undefined) {
+    throw new RallyError(
+      "INVALID_AMOUNT",
+      "Could not compute a slippage bound for this trade: it prices at zero output. " +
+        "Re-quote, or pass `minAmountOut` explicitly (`0n` opts out of the bound).",
+      { details: { amountIn: input.amountIn, amountOut: quote.amountOut } },
+    );
+  }
+
+  // Started here rather than awaited in place: it is a second round trip, and there is
+  // no reason to pay for it after the allowance read instead of alongside it.
+  // `resolveDeadline` never rejects, so it is safe to leave floating until it is used.
+  const deadlinePending = resolveDeadline(client, input);
+
   let approval: TxRequest | undefined;
   if (!payWithEth) {
     const trader = input.trader;
@@ -464,8 +531,7 @@ export async function prepareSwap(
   // Buys spend the quote, sells spend the token — direction follows from which side
   // the quote sorted onto.
   const zeroForOne = buy ? launch.quoteIsCurrency0 : !launch.quoteIsCurrency0;
-  const deadline = input.deadline ?? swapDeadline();
-  const amountLimit = input.minAmountOut ?? quote.minAmountOut;
+  const deadline = await deadlinePending;
 
   const data = encodeFunctionData({
     abi: rallyRouterAbi,
@@ -510,8 +576,10 @@ export interface PrepareSwapExactOutParams extends QuoteTradeExactOutParams {
    * exact-output swap it makes the router's check unsatisfiable rather than opting out.
    */
   maxAmountIn?: bigint;
-  /** Unix-seconds deadline. Defaults to 10 minutes out. */
+  /** Unix-seconds deadline. Defaults to `deadlineSeconds` ahead of chain time. */
   deadline?: bigint;
+  /** Window for the default deadline, in seconds. Defaults to 10 minutes. */
+  deadlineSeconds?: number;
   /**
    * Fund a wETH-quoted buy with native ETH (`msg.value`, wrapped by the router and the
    * remainder refunded) instead of a wETH allowance. Defaults to false; pass true
@@ -601,6 +669,9 @@ export async function prepareSwapExactOut(
     );
   }
 
+  // Overlapped with the allowance read below. See the note in {prepareSwap}.
+  const deadlinePending = resolveDeadline(client, input);
+
   let approval: TxRequest | undefined;
   if (!payWithEth) {
     const trader = input.trader;
@@ -634,7 +705,7 @@ export async function prepareSwapExactOut(
   // the quote sorted onto. Identical to the exact-input path: the sign of
   // `amountSpecified` chooses exact-in vs exact-out, `zeroForOne` chooses the leg.
   const zeroForOne = buy ? launch.quoteIsCurrency0 : !launch.quoteIsCurrency0;
-  const deadline = input.deadline ?? swapDeadline();
+  const deadline = await deadlinePending;
 
   const data = encodeFunctionData({
     abi: rallyRouterAbi,
@@ -688,7 +759,10 @@ export interface PrepareEthBuyParams {
   minAmountOut: bigint;
   /** Optional floor on the ETH→quote leg alone. `amountLimit` is the one that matters. */
   minQuoteOut?: bigint;
+  /** Unix-seconds deadline. Defaults to `deadlineSeconds` ahead of chain time. */
   deadline?: bigint;
+  /** Window for the default deadline, in seconds. Defaults to 10 minutes. */
+  deadlineSeconds?: number;
 }
 
 /**
@@ -796,6 +870,9 @@ export async function prepareEthBuy(
     );
   }
 
+  // Overlapped with the route validation below. See the note in {prepareSwap}.
+  const deadlinePending = resolveDeadline(client, input);
+
   const [token0, token1] = await Promise.all([
     readContract(client, { address: v3Pool, abi: uniswapV3PoolAbi, functionName: "token0" }),
     readContract(client, { address: v3Pool, abi: uniswapV3PoolAbi, functionName: "token1" }),
@@ -812,7 +889,7 @@ export async function prepareEthBuy(
   }
 
   const zeroForOne = launch.quoteIsCurrency0; // buying: the quote leg is the input
-  const deadline = input.deadline ?? swapDeadline();
+  const deadline = await deadlinePending;
   return {
     v3Pool,
     deadline,

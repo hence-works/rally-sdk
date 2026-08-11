@@ -111,8 +111,10 @@ export type { LaunchParams, LaunchResult, PreparedLaunch } from "./launch";
 // Trading
 export {
   APPROX_SLIPPAGE_BPS,
+  DEFAULT_DEADLINE_SECONDS,
   EXACT_SLIPPAGE_BPS,
   applySlippage,
+  chainDeadline,
   curveOf,
   prepareEthBuy,
   quoteEthHop,
