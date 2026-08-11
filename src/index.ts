@@ -115,6 +115,7 @@ export {
   applySlippage,
   curveOf,
   prepareEthBuy,
+  quoteEthHop,
   prepareSwap,
   prepareSwapExactOut,
   quoteTrade,

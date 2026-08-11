@@ -19,7 +19,7 @@
  * bound the router cannot satisfy, which presents to the user as an unsellable position
  * rather than as a bad price.
  */
-import { encodeFunctionData, type Address, type Hex } from "viem";
+import { encodeFunctionData, parseAbi, type Address, type Hex } from "viem";
 import { readContract } from "viem/actions";
 import { erc20Abi, rallyHookAbi, rallyRouterAbi, uniswapV3PoolAbi } from "./abis";
 import { RallyError } from "./errors";
@@ -701,6 +701,67 @@ export interface PrepareEthBuyParams {
  * pair) so a wrong route fails before signing rather than as an opaque `BadV3Pool`.
  * Exact-input buys only; there is no ETH-funded sell.
  */
+/** `sqrtPriceX96` is encoded over 2^96, so a price is the square of it over 2^192. */
+const Q192 = 1n << 192n;
+
+/** Not in `uniswapV3PoolAbi`, which carries only what the router path validates. */
+const v3Slot0Abi = parseAbi([
+  "function slot0() view returns (uint160 sqrtPriceX96, int24 tick, uint16 observationIndex, uint16 observationCardinality, uint16 observationCardinalityNext, uint8 feeProtocol, bool unlocked)",
+]);
+
+/**
+ * What `amountIn` wei of ETH buys of the quote asset on a wETH/quote v3 pool, at spot, less
+ * the pool's fee.
+ *
+ * This is the first leg of an ETH-funded buy into a launch that is NOT wETH-quoted:
+ * `RallyRouter.swapExactEthIn` sells the wrapped `msg.value` here before touching the curve.
+ * `prepareEthBuy` deliberately makes the caller supply `minAmountOut` across both legs, so
+ * somebody has to price this one, and pricing it here means every host prices it the same
+ * way instead of each carrying its own copy of the arithmetic.
+ *
+ * SPOT, and it models no price impact: it applies the fee tier and nothing else, so against
+ * a thin pool it overestimates. That is exactly why a bound derived from it belongs on the
+ * wide `toleranceFor(false)` band and never on the exact one.
+ */
+export async function quoteEthHop(
+  client: PublicClientLike,
+  params: { v3Pool: Address; weth: Address; amountIn: bigint },
+): Promise<bigint> {
+  if (params.amountIn <= 0n) return 0n;
+
+  const [slot0, fee, token0] = await Promise.all([
+    readContract(client, {
+      address: params.v3Pool,
+      abi: v3Slot0Abi,
+      functionName: "slot0",
+    }) as Promise<readonly [bigint, number, number, number, number, number, boolean]>,
+    readContract(client, {
+      address: params.v3Pool,
+      abi: uniswapV3PoolAbi,
+      functionName: "fee",
+    }) as Promise<number>,
+    readContract(client, {
+      address: params.v3Pool,
+      abi: uniswapV3PoolAbi,
+      functionName: "token0",
+    }) as Promise<Address>,
+  ]);
+
+  const sqrtPriceX96 = slot0[0];
+  if (sqrtPriceX96 <= 0n) return 0n;
+
+  // v3 encodes sqrtPriceX96 = sqrt(token1/token0) over BASE units, so token1-base per
+  // token0-base is the square over 2^192, and the reciprocal in the other direction.
+  const squared = sqrtPriceX96 * sqrtPriceX96;
+  const wethIsToken0 = token0.toLowerCase() === params.weth.toLowerCase();
+  const gross = wethIsToken0
+    ? (params.amountIn * squared) / Q192
+    : (params.amountIn * Q192) / squared;
+
+  // v3 fee units are millionths; bps are ten-thousandths.
+  return gross - (gross * (BigInt(fee) / 100n)) / BPS;
+}
+
 export async function prepareEthBuy(
   client: PublicClientLike,
   addresses: RallyAddresses,
