@@ -18,14 +18,21 @@ import { describe, expect, it } from "vitest";
 import {
   createPublicClient,
   custom,
+  decodeAbiParameters,
   decodeFunctionData,
   encodeAbiParameters,
   parseAbiParameters,
   type Address,
 } from "viem";
-import { erc20Abi, rallyRouterAbi } from "../src/abis";
+import { erc20Abi, rallyHookAbi, rallyRouterAbi } from "../src/abis";
 import { poolIdFor, poolKeyFor, sortCurrencies } from "../src/pool";
-import { DEFAULT_DEADLINE_SECONDS, prepareSwap, prepareSwapExactOut } from "../src/trade";
+import {
+  DEFAULT_DEADLINE_SECONDS,
+  prepareClaimReferralFees,
+  prepareSwap,
+  prepareSwapExactOut,
+  referralHookData,
+} from "../src/trade";
 import { RallyError } from "../src/errors";
 import type { CurveParams, LaunchState, PublicClientLike, RallyAddresses } from "../src/types";
 
@@ -34,6 +41,8 @@ const TOKEN: Address = "0x1f60EBa664cb43348a91a50dbcACAE0aDD7a595f";
 const HOOK: Address = "0x1B8e0c4163E4Db303Fc78E9b35801E8B87e8a888";
 const ROUTER: Address = "0x9A676e781A523b5d0C0e43731313A708CB607508";
 const TRADER: Address = "0xAebC4577f2DB3A819448d8e1779cfA851B5dbac0";
+/** A third-party venue naming itself as the referrer on the swaps it places. */
+const VENUE: Address = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8";
 
 const ADDRESSES: RallyAddresses = {
   chainId: 31337,
@@ -142,7 +151,13 @@ function decodeSwap(data: `0x${string}`) {
     bigint,
     bigint,
   ];
-  return { params: args[1], unwrapOut: args[3], amountLimit: args[4], deadline: args[5] };
+  return {
+    params: args[1],
+    hookData: args[2],
+    unwrapOut: args[3],
+    amountLimit: args[4],
+    deadline: args[5],
+  };
 }
 
 describe("prepareSwapExactOut", () => {
@@ -380,6 +395,39 @@ describe("prepareSwap (exact input)", () => {
     expect(prepared.deadline).toBe(42n);
   });
 
+  it("leaves hookData empty when no referrer is named", async () => {
+    const prepared = await prepareSwap(
+      clientWithAllowance(0n),
+      ADDRESSES,
+      launchState(),
+      PARAMS,
+      BUY,
+    );
+    expect(decodeSwap(prepared.request.data).hookData).toBe("0x");
+  });
+
+  it("encodes a referrer into hookData as the hook expects", async () => {
+    const prepared = await prepareSwap(clientWithAllowance(0n), ADDRESSES, launchState(), PARAMS, {
+      ...BUY,
+      referrer: VENUE,
+    });
+
+    const { hookData } = decodeSwap(prepared.request.data);
+    // 32 bytes, left-padded: the hook decodes exactly this shape and reverts BadHookData
+    // on anything else, so the length is as load-bearing as the value.
+    expect(hookData).toBe(referralHookData(VENUE));
+    expect((hookData.length - 2) / 2).toBe(32);
+    expect(decodeAbiParameters([{ type: "address" }], hookData)[0]).toBe(VENUE);
+  });
+
+  it("treats the zero referrer as no referral rather than as 32 zero bytes", async () => {
+    const prepared = await prepareSwap(clientWithAllowance(0n), ADDRESSES, launchState(), PARAMS, {
+      ...BUY,
+      referrer: "0x0000000000000000000000000000000000000000",
+    });
+    expect(decodeSwap(prepared.request.data).hookData).toBe("0x");
+  });
+
   it("falls back to the local clock when the node cannot serve a block", async () => {
     const prepared = await prepareSwap(
       clientWithoutBlocks(0n),
@@ -395,5 +443,21 @@ describe("prepareSwap (exact input)", () => {
     const expected = localNow + BigInt(DEFAULT_DEADLINE_SECONDS);
     expect(prepared.deadline >= expected - 5n).toBe(true);
     expect(prepared.deadline <= expected + 5n).toBe(true);
+  });
+});
+
+describe("prepareClaimReferralFees", () => {
+  it("targets the hook and names no recipient", () => {
+    const request = prepareClaimReferralFees(ADDRESSES, WETH);
+
+    expect(request.to).toBe(HOOK);
+    expect(request.value).toBe(0n);
+    expect(request.chainId).toBe(ADDRESSES.chainId);
+
+    const decoded = decodeFunctionData({ abi: rallyHookAbi, data: request.data });
+    expect(decoded.functionName).toBe("claimReferralFees");
+    // The quote is the only argument: the hook pays `msg.sender`, so the signer IS the
+    // recipient and there is no address here to get wrong.
+    expect(decoded.args).toEqual([WETH]);
   });
 });

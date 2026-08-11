@@ -28,9 +28,11 @@ import {
 import { cleanMetadata, createRallyPinner, type MetadataConfig, type MetadataPinner } from "./metadata";
 import { createCache, readCurveParams, readFeePolicy } from "./params";
 import {
+  prepareClaimReferralFees as prepareClaimReferralFeesInner,
   prepareEthBuy as prepareEthBuyInner,
   prepareSwap as prepareSwapInner,
   prepareSwapExactOut as prepareSwapExactOutInner,
+  readReferralFees as readReferralFeesInner,
   quoteTrade as quoteTradeInner,
   quoteTradeExactOut as quoteTradeExactOutInner,
   resolveLaunch,
@@ -423,6 +425,43 @@ export function createRallyClient(config: RallyClientConfig) {
       const prepared = await this.prepareEthBuy(token, input);
       const { hash, receipt } = await send(prepared.request);
       return { ...prepared, hash, receipt };
+    },
+
+    // ──────────────────────────── referrals (§6.2) ────────────────────────────
+
+    /**
+     * Referral fees earned in `quote` and not yet claimed. Defaults to the configured
+     * wallet's account, which is the address a venue would normally have been naming as
+     * the `referrer` on its swaps.
+     */
+    referralFees(quote: Address, referrer?: Address): Promise<bigint> {
+      const who = referrer ?? account();
+      if (!who) {
+        throw new RallyError(
+          "NO_ACCOUNT",
+          "Pass `referrer` (or configure a walletClient) so there is an address to read a " +
+            "referral balance for.",
+        );
+      }
+      return readReferralFeesInner(publicClient, addresses, who, quote);
+    },
+
+    /** Unsigned `claimReferralFees(quote)`. Pays whoever signs it. */
+    prepareClaimReferralFees(quote: Address): TxRequest {
+      return prepareClaimReferralFeesInner(addresses, quote);
+    },
+
+    /**
+     * Claim referral fees in `quote`, paid to the wallet's own account. Reports the
+     * balance as it stood before sending, which is what the claim pays out — trades
+     * landing between the read and the claim are included in the payout but not in this
+     * figure, so treat it as a floor rather than an exact receipt.
+     */
+    async claimReferralFees(quote: Address) {
+      requireWallet();
+      const amount = await this.referralFees(quote);
+      const { hash, receipt } = await send(this.prepareClaimReferralFees(quote));
+      return { hash, receipt, amount };
     },
 
     /** Send any prepared request with the configured wallet. */

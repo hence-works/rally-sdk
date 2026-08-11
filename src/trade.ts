@@ -19,9 +19,10 @@
  * bound the router cannot satisfy, which presents to the user as an unsellable position
  * rather than as a bad price.
  */
-import { encodeFunctionData, parseAbi, type Address, type Hex } from "viem";
+import { encodeAbiParameters, encodeFunctionData, parseAbi, type Address, type Hex } from "viem";
 import { getBlock, readContract } from "viem/actions";
 import { erc20Abi, rallyHookAbi, rallyRouterAbi, uniswapV3PoolAbi } from "./abis";
+import { ZERO_ADDRESS } from "./addresses";
 import { RallyError } from "./errors";
 import { poolIdFor, poolKeyFor, sortCurrencies, V4, type PoolKey } from "./pool";
 import {
@@ -124,6 +125,19 @@ function resolveDeadline(
 ): Promise<bigint> {
   if (input.deadline !== undefined) return Promise.resolve(input.deadline);
   return chainDeadline(client, input.deadlineSeconds);
+}
+
+/**
+ * The swap's `hookData`: the §6.2 referral envelope, or empty.
+ *
+ * The hook accepts exactly two shapes — nothing, or 32 bytes holding one address — and
+ * reverts `BadHookData` on anything else, so this is the only correct way to build it.
+ * A zero referrer encodes as empty rather than as 32 zero bytes: both mean "no referral"
+ * on-chain, and the empty form costs the trader less calldata.
+ */
+export function referralHookData(referrer?: Address): Hex {
+  if (!referrer || referrer === ZERO_ADDRESS) return "0x";
+  return encodeAbiParameters([{ type: "address" }], [referrer]);
 }
 
 /**
@@ -426,6 +440,16 @@ export interface PrepareSwapParams extends QuoteTradeParams {
   /** Window for the default deadline, in seconds. Defaults to 10 minutes. */
   deadlineSeconds?: number;
   /**
+   * Credit this address with a share of the platform's cut of the trade's fee (§6.2).
+   * Your own payout address, if you are the venue placing the trade. Costs the trader
+   * nothing: the referral comes out of protocol revenue, not out of the fee they pay,
+   * so a referred trade and an unreferred one price identically.
+   *
+   * Named per swap and never stored on-chain, so it is yours to decide per call. Claim
+   * what accrues with `claimReferralFees(quote)`.
+   */
+  referrer?: Address;
+  /**
    * Fund a wETH-quoted buy with native ETH (`msg.value`, wrapped by the router and the
    * remainder refunded) instead of a wETH allowance. Defaults to false — pass true
    * when the trader holds ETH rather than wETH.
@@ -544,7 +568,7 @@ export async function prepareSwap(
         amountSpecified: -input.amountIn,
         sqrtPriceLimitX96: zeroForOne ? V4.MIN_SQRT_RATIO + 1n : V4.MAX_SQRT_RATIO - 1n,
       },
-      "0x",
+      referralHookData(input.referrer),
       unwrapOut,
       amountLimit,
       deadline,
@@ -580,6 +604,8 @@ export interface PrepareSwapExactOutParams extends QuoteTradeExactOutParams {
   deadline?: bigint;
   /** Window for the default deadline, in seconds. Defaults to 10 minutes. */
   deadlineSeconds?: number;
+  /** Credit a venue with a share of the platform's cut (§6.2). See {PrepareSwapParams}. */
+  referrer?: Address;
   /**
    * Fund a wETH-quoted buy with native ETH (`msg.value`, wrapped by the router and the
    * remainder refunded) instead of a wETH allowance. Defaults to false; pass true
@@ -718,7 +744,7 @@ export async function prepareSwapExactOut(
         amountSpecified: input.amountOut,
         sqrtPriceLimitX96: zeroForOne ? V4.MIN_SQRT_RATIO + 1n : V4.MAX_SQRT_RATIO - 1n,
       },
-      "0x",
+      referralHookData(input.referrer),
       unwrapOut,
       maxAmountIn,
       deadline,
@@ -763,6 +789,8 @@ export interface PrepareEthBuyParams {
   deadline?: bigint;
   /** Window for the default deadline, in seconds. Defaults to 10 minutes. */
   deadlineSeconds?: number;
+  /** Credit a venue with a share of the platform's cut (§6.2). See {PrepareSwapParams}. */
+  referrer?: Address;
 }
 
 /**
@@ -902,7 +930,7 @@ export async function prepareEthBuy(
         args: [
           launch.poolKey,
           zeroForOne,
-          "0x",
+          referralHookData(input.referrer),
           v3Pool,
           input.minQuoteOut ?? 0n,
           input.minAmountOut,
@@ -912,5 +940,53 @@ export async function prepareEthBuy(
       value: input.amountIn,
       chainId: addresses.chainId,
     },
+  };
+}
+
+// ───────────────────────────── referral fees (§6.2) ─────────────────────────────
+
+/**
+ * What `referrer` has earned in `quote` and not yet claimed, in that quote's base units.
+ *
+ * Per quote, not per pool: a venue that referred trades on twenty launches quoted in wETH
+ * has one wETH balance. Read it once per quote you have referred trades in, which for most
+ * integrators is one or two.
+ */
+export function readReferralFees(
+  client: PublicClientLike,
+  addresses: RallyAddresses,
+  referrer: Address,
+  quote: Address,
+): Promise<bigint> {
+  return readContract(client, {
+    address: addresses.launchHook,
+    abi: rallyHookAbi,
+    functionName: "referralFeesOwed",
+    args: [referrer, quote],
+  });
+}
+
+/**
+ * Unsigned `claimReferralFees(quote)`, which pays the WHOLE balance to whoever sends it.
+ *
+ * There is no recipient argument by design: the hook pays `msg.sender`, so the address
+ * that signs this is the address that must have been named as the referrer. Sending it
+ * from a different account claims that account's balance, which is usually zero rather
+ * than an error, so check {readReferralFees} for the signer first if a claim comes back
+ * empty.
+ */
+export function prepareClaimReferralFees(
+  addresses: RallyAddresses,
+  quote: Address,
+): TxRequest {
+  return {
+    to: addresses.launchHook,
+    data: encodeFunctionData({
+      abi: rallyHookAbi,
+      functionName: "claimReferralFees",
+      args: [quote],
+    }),
+    value: 0n,
+    chainId: addresses.chainId,
   };
 }

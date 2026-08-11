@@ -279,6 +279,39 @@ await rally.ethBuy(token, {
 The v3 pool is validated against `token0`/`token1` before the transaction is built, so
 a wrong route fails locally instead of reverting `BadV3Pool` on-chain.
 
+### Referral fees
+
+Every swap takes an optional `referrer`. Name your own payout address and you keep 20% ⚙
+of the platform's cut of that trade's fee:
+
+```ts
+await rally.swap(token, {
+  side: "buy",
+  amountIn: parseEther("0.1"),
+  referrer: "0xYourVenue…",   // your payout address
+});
+
+await rally.referralFees(quote);            // unclaimed, in that quote's base units
+await rally.claimReferralFees(quote);       // pays your wallet; prepareClaimReferralFees for unsigned
+```
+
+**It costs the trader nothing.** The referral comes out of the protocol's own revenue, not
+out of the fee the trader pays and not out of the creator's share, so a referred trade and
+an unreferred one price identically. There is nothing to disclose to your users and nothing
+that makes your venue worse to trade on than rally.fun.
+
+There is no registration, no allowlist and no on-chain binding between a trader and a
+venue: the referrer is named per swap and you may name a different one on the next call.
+Balances are keyed by `(referrer, quote)`, not by pool, so refer trades across a hundred
+launches and claim once per quote asset. Claims are pull-only and pay `msg.sender`, so
+claim from the address you named.
+
+Under the hood this rides in the swap's `hookData` as 32 bytes of `abi.encode(referrer)`;
+the hook rejects any other shape with `BadHookData`. Use the `referrer` option rather than
+building it yourself, or `referralHookData(addr)` if you are assembling calldata by hand.
+`RallyRouter` re-emits the referrer on `RallySwap`, so you can attribute your own fills
+from logs without an indexer.
+
 ---
 
 ## Chains & addresses

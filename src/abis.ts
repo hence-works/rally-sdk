@@ -87,6 +87,11 @@ export const rallyHookAbi = parseAbi([
   "function previewCreatorFees(bytes32 pid) view returns (uint256)",
   "function claimCreatorFees(bytes32 pid) returns (uint256 amount)",
   "function pokeFees(bytes32 pid)",
+  // §6.2 referrals. Keyed by (referrer, quote) rather than by pool: a venue refers trades
+  // across many launches and claims once per quote asset. The claim pays `msg.sender`,
+  // so there is no recipient argument to get wrong.
+  "function referralFeesOwed(address referrer, address quote) view returns (uint256)",
+  "function claimReferralFees(address quote) returns (uint256 amount)",
   "function weth() view returns (address)",
   "event Launched(bytes32 indexed pid, address indexed token, address indexed creator, address quote, uint256 gradThreshold, string metadataURI)",
   "event FeeConfigSet(bytes32 indexed pid, uint16 creatorBps, uint16 dividendBps, uint16 buybackBps, uint16 lpSupportBps)",
@@ -97,6 +102,10 @@ export const rallyHookAbi = parseAbi([
   // parse it to report what the creator actually received.
   "event CreatorFeesAccrued(bytes32 indexed pid, address indexed creator, uint256 amount)",
   "event CreatorFeesClaimed(bytes32 indexed pid, address indexed creator, uint256 amount)",
+  // Referral revenue, at the moment it is earned. Carries the pool so a venue can break
+  // its earnings down per coin, and the quote because the balance it feeds is per-quote.
+  "event ReferralFeesAccrued(bytes32 indexed pid, address indexed referrer, address indexed quote, uint256 amount)",
+  "event ReferralFeesClaimed(address indexed referrer, address indexed quote, uint256 amount)",
 ]);
 
 /**
@@ -110,13 +119,21 @@ export const rallyHookAbi = parseAbi([
  * `swapExactEthIn` buys a launch quoted in something the trader doesn't hold (USDC, …)
  * with native ETH: the router wraps `msg.value`, sells it for the quote on a caller-
  * supplied Uniswap **v3** pool, then spends the whole proceeds on the curve.
+ *
+ * `hookData` is the §6.2 referral envelope: 32 bytes of `abi.encode(referrer)` to credit a
+ * venue with a share of the platform's cut, or empty. Nothing else is accepted — the hook
+ * reverts `BadHookData`. Build it with the `referrer` option on the prepare calls rather
+ * than by hand.
  */
 export const rallyRouterAbi = parseAbi([
   "function swap((address currency0, address currency1, uint24 fee, int24 tickSpacing, address hooks) key, (bool zeroForOne, int256 amountSpecified, uint160 sqrtPriceLimitX96) params, bytes hookData, bool unwrapOut, uint256 amountLimit, uint256 deadline) payable returns (int256 delta)",
   "function swapExactEthIn((address currency0, address currency1, uint24 fee, int24 tickSpacing, address hooks) key, bool zeroForOne, bytes hookData, address v3Pool, uint256 minQuoteOut, uint256 amountLimit, uint256 deadline) payable returns (int256 delta)",
   "function manager() view returns (address)",
   "function weth() view returns (address)",
-  "event RallySwap(bytes32 indexed id, address indexed trader, bool zeroForOne, int128 amount0, int128 amount1, uint160 sqrtPriceX96, int24 tick)",
+  // `referrer` is the venue this fill's hookData named (zero for none) — an attribution
+  // copy of what the hook decoded, so a fill can be credited to a venue without joining
+  // against `ReferralFeesAccrued`.
+  "event RallySwap(bytes32 indexed id, address indexed trader, address indexed referrer, bool zeroForOne, int128 amount0, int128 amount1, uint160 sqrtPriceX96, int24 tick)",
 ]);
 
 /** RallyParamRegistry — governance-tunable params behind a 48h timelock. */
