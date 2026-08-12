@@ -51,8 +51,8 @@ export const REGISTRY_KEYS = {
   FLUSH_MAX_RESERVE_BPS: 17,
   /**
    * The referrer's share OF THE PLATFORM'S CUT of a referred trade's fee (§6.2), not of
-   * the fee itself. Default 2000 (20% of the platform cut, so 5% of a fee under the
-   * default 25% platform rate). Reads back 0 on a registry deployed before this key
+   * the fee itself. Default 2000 (20% of the platform cut, so 10% of a fee under the
+   * default 50% platform rate). Reads back 0 on a registry deployed before this key
    * existed, which simply means referrals are off there.
    */
   REFERRAL_FEE_BPS: 18,
