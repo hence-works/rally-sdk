@@ -7,6 +7,7 @@
 import { describe, expect, it } from "vitest";
 import {
   BPS,
+  clmmAmountIn,
   clmmAmountOut,
   curveFeeBps,
   fdv,
@@ -312,6 +313,64 @@ describe("clmmAmountOut — graduated pool", () => {
       expect(clmmAmountOut(10n ** 18n, T_RESERVE, 0n, 100n, quoteIsInput)).toBe(0n);
       expect(clmmAmountOut(0n, T_RESERVE, Q_RESERVE, 100n, quoteIsInput)).toBe(0n);
     }
+  });
+
+  // The exact-out inverse. Pinned by round-tripping through clmmAmountOut, so the two
+  // stay each other's inverses: paying the quoted input must produce at least the
+  // wanted output, with only rounding-and-gross-up slack above it.
+  describe("clmmAmountIn — exact-out inverse", () => {
+    it("buy: the quoted input buys at least the wanted tokens, with no real overshoot", () => {
+      const want = T_RESERVE / 50n; // 2% of depth
+      const inv = clmmAmountIn(want, Q_RESERVE, T_RESERVE, POOL_FEE_BPS, true)!;
+      const out = clmmAmountOut(inv.amountIn, Q_RESERVE, T_RESERVE, POOL_FEE_BPS, true);
+      expect(out >= want).toBe(true);
+      expect(Number(((out - want) * 1_000_000n) / want)).toBeLessThan(100); // < 0.01% slack
+    });
+
+    it("sell: the quoted tokens net at least the wanted quote, with no real overshoot", () => {
+      const want = Q_RESERVE / 50n;
+      const inv = clmmAmountIn(want, T_RESERVE, Q_RESERVE, POOL_FEE_BPS, false)!;
+      const out = clmmAmountOut(inv.amountIn, T_RESERVE, Q_RESERVE, POOL_FEE_BPS, false);
+      expect(out >= want).toBe(true);
+      expect(Number(((out - want) * 1_000_000n) / want)).toBeLessThan(100);
+    });
+
+    it("charges the fee on the hook's side of each direction", () => {
+      const wantTokens = T_RESERVE / 100n;
+      const buy = clmmAmountIn(wantTokens, Q_RESERVE, T_RESERVE, POOL_FEE_BPS, true)!;
+      // Buy: fee sits on top of the pool's required input — f/(1−f) of it, grossed up.
+      const poolIn = buy.amountIn - buy.feeQuote;
+      expect(buy.feeQuote).toBe(grossUpForFee(poolIn, POOL_FEE_BPS) - poolIn);
+
+      const wantQuote = Q_RESERVE / 100n;
+      const sell = clmmAmountIn(wantQuote, T_RESERVE, Q_RESERVE, POOL_FEE_BPS, false)!;
+      // Sell: the pool must produce the grossed-up output; the hook keeps the difference.
+      expect(sell.feeQuote).toBe(grossUpForFee(wantQuote, POOL_FEE_BPS) - wantQuote);
+
+      // Zero fee: both collapse to the pure constant-product inverse.
+      expect(clmmAmountIn(wantTokens, Q_RESERVE, T_RESERVE, 0n, true)!.feeQuote).toBe(0n);
+      expect(clmmAmountIn(wantQuote, T_RESERVE, Q_RESERVE, 0n, false)!.feeQuote).toBe(0n);
+    });
+
+    it("returns null when the pool cannot produce the wanted output", () => {
+      // A constant product can never pay out its whole reserve.
+      expect(clmmAmountIn(T_RESERVE, Q_RESERVE, T_RESERVE, POOL_FEE_BPS, true)).toBeNull();
+      expect(clmmAmountIn(Q_RESERVE, T_RESERVE, Q_RESERVE, POOL_FEE_BPS, false)).toBeNull();
+      // A sell must clear the reserve AFTER grossing up for the fee, so it turns null
+      // strictly before the raw reserve is asked for.
+      const nearAll = (Q_RESERVE * (BPS - POOL_FEE_BPS)) / BPS + 1n;
+      expect(clmmAmountIn(nearAll, T_RESERVE, Q_RESERVE, POOL_FEE_BPS, false)).toBeNull();
+      // Empty reserves cannot serve anything.
+      expect(clmmAmountIn(10n ** 18n, 0n, T_RESERVE, POOL_FEE_BPS, true)).toBeNull();
+      expect(clmmAmountIn(10n ** 18n, Q_RESERVE, 0n, POOL_FEE_BPS, true)).toBeNull();
+    });
+
+    it("treats a non-positive want as free rather than as unfillable", () => {
+      expect(clmmAmountIn(0n, Q_RESERVE, T_RESERVE, POOL_FEE_BPS, true)).toEqual({
+        amountIn: 0n,
+        feeQuote: 0n,
+      });
+    });
   });
 });
 

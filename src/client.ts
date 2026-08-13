@@ -308,7 +308,8 @@ export function createRallyClient(config: RallyClientConfig) {
       return quoteTradeInner(launch, params, input);
     },
 
-    /** Price an exact-output trade (curve phase only). */
+    /** Price an exact-output trade: exact on the curve, a reserve-inverted estimate
+     *  with the wider tolerance once graduated. */
     async quoteExactOut(
       token: Address,
       input: QuoteTradeExactOutParams,
@@ -362,7 +363,7 @@ export function createRallyClient(config: RallyClientConfig) {
 
     /**
      * Build an unsigned exact-OUTPUT swap ("buy exactly 1M tokens"), plus the approval it
-     * needs, without sending. Curve phase only.
+     * needs, without sending. Works in both phases; see {quoteTradeExactOut}.
      */
     async prepareSwapExactOut(
       token: Address,

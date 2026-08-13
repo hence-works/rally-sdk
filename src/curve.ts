@@ -214,6 +214,61 @@ export function clmmAmountOut(
   return gross - (gross * fee) / BPS;
 }
 
+/**
+ * Exact-OUTPUT input for the graduated pool: the inverse of {clmmAmountOut}, priced
+ * against the same reserves and carrying the same accuracy caveats (an estimate, not the
+ * chain's own math — a quote built from it keeps the wider tolerance).
+ *
+ * The fee sides mirror `RallyHook`'s exact-output handling, which differs from exact-in
+ * in WHERE the fee is claimed but not in what it is: always `POOL_FEE_BPS` of the gross
+ * quote moving through the pool, grossed up so the trader ends with exactly what they
+ * asked for (`_postGradFeeAmount` with `exactIn = false`):
+ *
+ *   - BUY  (want exact tokens): the pool's required quote input is computed first, then
+ *     `afterSwap` charges the fee on top of it via the unspecified-leg delta. The trader
+ *     pays `grossUp(poolIn)`.
+ *   - SELL (want exact quote): `beforeSwap` grows the swap by the fee, so the pool must
+ *     pay out `grossUp(wantOut)` and the token input is what THAT costs. The trader
+ *     receives exactly `wantOut`; the hook keeps the difference.
+ *
+ * Returns `null` when the pool cannot produce the wanted output — the output leg's
+ * reserve (grossed up for the fee on a sell) does not cover it. On-chain that is a short
+ * fill, which an armed fee rejects as `PartialFill`; refusing to quote it is the same
+ * posture as the curve's `ExactOutputExceedsReserve`.
+ *
+ * @param amountOut    wanted output, base units of the output leg.
+ * @param reserveIn    reserve of the leg being paid in, base units.
+ * @param reserveOut   reserve of the leg being received, base units.
+ * @param swapFeeBps   the hook's post-graduation fee (POOL_FEE_BPS).
+ * @param quoteIsInput true for a buy (fee on top of the input), false for a sell (fee
+ *                     widens the output the pool must produce). Required rather than
+ *                     defaulted, same as {clmmAmountOut}.
+ */
+export function clmmAmountIn(
+  amountOut: bigint,
+  reserveIn: bigint,
+  reserveOut: bigint,
+  swapFeeBps: bigint,
+  quoteIsInput: boolean,
+): { amountIn: bigint; feeQuote: bigint } | null {
+  if (amountOut <= 0n) return { amountIn: 0n, feeQuote: 0n };
+  if (reserveIn <= 0n || reserveOut <= 0n) return null;
+  const fee = swapFeeBps >= BPS ? BPS - 1n : swapFeeBps < 0n ? 0n : swapFeeBps;
+  if (quoteIsInput) {
+    if (amountOut >= reserveOut) return null;
+    // Ceiling, so the estimate never sits below what the pool would actually charge.
+    const denom = reserveOut - amountOut;
+    const poolIn = (reserveIn * amountOut + denom - 1n) / denom;
+    const gross = grossUpForFee(poolIn, fee);
+    return { amountIn: gross, feeQuote: gross - poolIn };
+  }
+  const quoteGross = grossUpForFee(amountOut, fee);
+  if (quoteGross >= reserveOut) return null;
+  const denom = reserveOut - quoteGross;
+  const amountIn = (reserveIn * quoteGross + denom - 1n) / denom;
+  return { amountIn, feeQuote: quoteGross - amountOut };
+}
+
 /** Governance params driving the §4.2 anti-snipe fee decay. */
 export interface CurveFeeParams {
   /** CURVE_FEE_START_BPS — fee at launch. */

@@ -276,18 +276,89 @@ describe("prepareSwapExactOut", () => {
     expect(prepared.approval!.to).toBe(TOKEN);
   });
 
-  it("throws UNSUPPORTED on a graduated launch rather than mispricing a transaction", async () => {
-    const graduated = launchState({ phase: "GRADUATED", graduatedAt: LAUNCHED_AT + 60 });
-    const call = prepareSwapExactOut(clientWithAllowance(0n), ADDRESSES, graduated, PARAMS, {
-      side: "buy",
-      amountOut: ONE_MILLION,
-      trader: TRADER,
-      atTime: AT_TIME,
+  // Live reserves captured from a real graduated pool (see curve.test.ts for the
+  // provenance): the estimate must carry the trade's own price impact.
+  const GRAD_RESERVES = {
+    quote: 836740873017552922n, // 0.83674 wETH
+    token: 191218100082752180896397374n, // 191.218M tokens
+  };
+  const graduatedState = (over: Partial<LaunchState> = {}) =>
+    launchState({
+      phase: "GRADUATED",
+      graduatedAt: LAUNCHED_AT + 60,
+      bonded: B,
+      reserves: GRAD_RESERVES,
+      ...over,
     });
 
+  it("prices a graduated buy off the pool's real reserves, with the wider band", async () => {
+    const prepared = await prepareSwapExactOut(
+      clientWithAllowance(0n),
+      ADDRESSES,
+      graduatedState(),
+      PARAMS,
+      { side: "buy", amountOut: ONE_MILLION, trader: TRADER, atTime: AT_TIME },
+    );
+
+    // An approximate estimate, so it takes the 5% default and says so.
+    expect(prepared.quote.exact).toBe(false);
+    expect(prepared.quote.slippageBps).toBe(500n);
+    expect(prepared.quote.phase).toBe("GRADUATED");
+    expect(prepared.quote.amountIn > 0n).toBe(true);
+
+    const { params, amountLimit } = decodeSwap(prepared.request.data);
+    expect(params.amountSpecified).toBe(ONE_MILLION);
+    expect(amountLimit).toBe(prepared.quote.maxAmountIn);
+
+    // The fee is the hook's POOL_FEE_BPS grossed up on the pool's required input, so
+    // the total is strictly more than the fee-free constant-product inverse.
+    const denom = GRAD_RESERVES.token - ONE_MILLION;
+    const poolIn = (GRAD_RESERVES.quote * ONE_MILLION + denom - 1n) / denom;
+    expect(prepared.quote.amountIn - prepared.quote.feeQuote).toBe(poolIn);
+    expect(prepared.quote.feeQuote > 0n).toBe(true);
+  });
+
+  it("prices a graduated sell so the trader nets exactly the wanted quote", async () => {
+    const wantQuote = GRAD_RESERVES.quote / 100n;
+    const prepared = await prepareSwapExactOut(
+      clientWithAllowance(0n),
+      ADDRESSES,
+      graduatedState(),
+      PARAMS,
+      { side: "sell", amountOut: wantQuote, trader: TRADER, atTime: AT_TIME },
+    );
+
+    // The pool must produce the grossed-up output; the hook keeps the difference. The
+    // fee is therefore a function of the WANTED amount alone, not of the token input.
+    const gross = (wantQuote * 10_000n + (10_000n - PARAMS.poolFeeBps) - 1n) / (10_000n - PARAMS.poolFeeBps);
+    expect(prepared.quote.feeQuote).toBe(gross - wantQuote);
+    // Selling spends the token, so that is the leg needing the allowance.
+    expect(prepared.approval!.to).toBe(TOKEN);
+    expect(decodeSwap(prepared.request.data).unwrapOut).toBe(true);
+  });
+
+  it("throws NO_PRICE on a graduated launch whose reserves are missing", async () => {
+    const call = prepareSwapExactOut(
+      clientWithAllowance(0n),
+      ADDRESSES,
+      graduatedState({ reserves: { quote: 0n, token: 0n } }),
+      PARAMS,
+      { side: "buy", amountOut: ONE_MILLION, trader: TRADER, atTime: AT_TIME },
+    );
     await expect(call).rejects.toThrow(RallyError);
-    await expect(call).rejects.toThrow(/curve-phase only/);
-    await expect(call).rejects.toMatchObject({ code: "UNSUPPORTED" });
+    await expect(call).rejects.toMatchObject({ code: "NO_PRICE" });
+  });
+
+  it("throws INVALID_AMOUNT when no reserve can pay the wanted output", async () => {
+    const call = prepareSwapExactOut(
+      clientWithAllowance(0n),
+      ADDRESSES,
+      graduatedState(),
+      PARAMS,
+      { side: "sell", amountOut: GRAD_RESERVES.quote, trader: TRADER, atTime: AT_TIME },
+    );
+    await expect(call).rejects.toThrow(RallyError);
+    await expect(call).rejects.toMatchObject({ code: "INVALID_AMOUNT" });
   });
 
   it("rejects a non-positive amountOut", async () => {

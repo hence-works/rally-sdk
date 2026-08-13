@@ -218,7 +218,10 @@ for calldata you build yourself.
 
 ### Exact output
 
-Curve phase only, and it has both a quote and a prepared transaction:
+Works in both phases: on the curve it is the contract's closed-form inverse, priced
+exactly; once graduated it inverts the reserve estimate above, comes back
+`exact: false` and keeps the wider 5% default. It has both a quote and a prepared
+transaction:
 
 ```ts
 const q = await rally.quoteExactOut(token, {

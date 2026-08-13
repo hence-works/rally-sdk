@@ -26,6 +26,7 @@ import { ZERO_ADDRESS } from "./addresses";
 import { RallyError } from "./errors";
 import { poolIdFor, poolKeyFor, sortCurrencies, V4, type PoolKey } from "./pool";
 import {
+  clmmAmountIn,
   clmmAmountOut,
   curveFeeBps,
   initCurve,
@@ -367,7 +368,14 @@ export interface QuoteTradeExactOutParams {
   atTime?: number;
 }
 
-/** Exact-output pricing: what `wantOut` will cost. Curve phase only. */
+/**
+ * Exact-output pricing: what `wantOut` will cost.
+ *
+ * On the curve this is the contract's own closed-form inverse. Once graduated it is the
+ * inverse of {quoteTrade}'s reserve estimate ({clmmAmountIn}), so it needs both legs of
+ * `launch.reserves` and comes back `exact: false` with the wider default tolerance —
+ * identical posture to the graduated exact-in path.
+ */
 export function quoteTradeExactOut(
   launch: LaunchState,
   params: CurveParams,
@@ -375,11 +383,46 @@ export function quoteTradeExactOut(
 ): TradeQuoteExactOut {
   const curve = launch.phase === "CURVE" ? curveOf(launch, params) : null;
   if (!curve) {
-    throw new RallyError(
-      "UNSUPPORTED",
-      "Exact-output quoting is curve-phase only. A graduated pool needs a v4 quoter.",
-      { details: { phase: launch.phase } },
-    );
+    const { quote: quoteReserve, token: tokenReserve } = launch.reserves;
+    if (quoteReserve <= 0n || tokenReserve <= 0n) {
+      throw new RallyError(
+        "NO_PRICE",
+        `No liquidity available for ${launch.token} — the pool has graduated but reports ` +
+          `an empty reserve (quote ${quoteReserve}, token ${tokenReserve}). Refusing to ` +
+          `quote a trade that cannot be bounded.`,
+        {
+          details: {
+            token: launch.token,
+            phase: launch.phase,
+            quoteReserve,
+            tokenReserve,
+          },
+        },
+      );
+    }
+    const inverse =
+      input.side === "buy"
+        ? clmmAmountIn(input.amountOut, quoteReserve, tokenReserve, params.poolFeeBps, true)
+        : clmmAmountIn(input.amountOut, tokenReserve, quoteReserve, params.poolFeeBps, false);
+    if (!inverse) {
+      throw new RallyError(
+        "INVALID_AMOUNT",
+        `Cannot withdraw ${input.amountOut} from the graduated pool: it exceeds the ` +
+          `reserve behind it (quote ${quoteReserve}, token ${tokenReserve}). On-chain ` +
+          `this cannot fill.`,
+        { details: { quoteReserve, tokenReserve, wanted: input.amountOut } },
+      );
+    }
+    const slippageBps = input.slippageBps ?? toleranceFor(false);
+    return {
+      amountIn: inverse.amountIn,
+      maxAmountIn: (inverse.amountIn * (BPS + slippageBps)) / BPS,
+      feeQuote: inverse.feeQuote,
+      crossesGraduation: false,
+      slippageBps,
+      exact: false,
+      phase: launch.phase,
+    };
   }
   const now = input.atTime ?? Math.floor(Date.now() / 1000);
   const feeBps = curveFeeBps(
@@ -423,6 +466,8 @@ export function quoteTradeExactOut(
     feeQuote: preview.feeQuote,
     crossesGraduation: preview.crossesGraduation,
     slippageBps,
+    exact: !preview.crossesGraduation,
+    phase: launch.phase,
   };
 }
 
@@ -650,8 +695,9 @@ export interface PreparedSwapExactOut {
  *     in the way the bound exists to tolerate. Over-sent ETH comes back: the router
  *     refunds the wrap its input leg did not consume.
  *
- * Curve phase only, matching {quoteTradeExactOut}: a graduated pool needs a v4 quoter,
- * and building a transaction off a price we cannot compute would just mislead.
+ * Works in both phases, matching {quoteTradeExactOut}: exact on the curve, a
+ * reserve-inverted estimate with the wider band once graduated (which needs both legs of
+ * `launch.reserves` populated, or the quote refuses with NO_PRICE).
  */
 export async function prepareSwapExactOut(
   client: PublicClientLike,
@@ -664,7 +710,8 @@ export async function prepareSwapExactOut(
     throw new RallyError("INVALID_AMOUNT", "amountOut must be greater than zero.");
   }
 
-  // Throws UNSUPPORTED on a graduated launch, before anything is built.
+  // Throws NO_PRICE on a graduated launch whose reserves are missing, and
+  // INVALID_AMOUNT on an output no reserve can pay, before anything is built.
   const quote = quoteTradeExactOut(launch, params, input);
 
   const buy = input.side === "buy";

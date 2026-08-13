@@ -206,23 +206,34 @@ export interface TradeQuote {
 }
 
 /**
- * A priced exact-OUTPUT trade: what a wanted output costs. Curve phase only.
+ * A priced exact-OUTPUT trade: what a wanted output costs.
  *
  * The mirror image of {TradeQuote}'s bound. Exact-in bounds the output from below
  * (`minAmountOut`); exact-out bounds the INPUT from above, so `maxAmountIn` is
  * `amountIn` widened by the tolerance rather than cut by it.
+ *
+ * On the curve the estimate is the contract's own closed-form inverse; once graduated it
+ * inverts the constant-product estimate over the locked position's real reserves, same
+ * accuracy class as the graduated exact-in path — `exact` says which one you got.
  */
 export interface TradeQuoteExactOut {
   /** Estimated input needed, in the input leg's base units. */
   amountIn: bigint;
   /** The `amountLimit` a swap built from this quote will submit: a ceiling on the input. */
   maxAmountIn: bigint;
-  /** Curve fee charged, in quote base units. */
+  /** Fee charged (curve fee, or the hook's post-graduation fee), in quote base units. */
   feeQuote: bigint;
   /** True when this buy would bond `b` to `B` and graduate the launch mid-swap. */
   crossesGraduation: boolean;
   /** Tolerance applied to reach `maxAmountIn`, bps. */
   slippageBps: bigint;
+  /**
+   * True when the estimate reproduces the on-chain math exactly (a non-crossing curve
+   * trade). False for a graduation-crossing buy and for any graduated-pool estimate,
+   * which model CLMM slippage only approximately — those get the wider slippage band.
+   */
+  exact: boolean;
+  phase: Phase;
 }
 
 /** Progress callbacks for the multi-step one-call helpers. */
