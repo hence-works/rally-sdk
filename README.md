@@ -183,8 +183,8 @@ const launch = await rally.getLaunch(token);
 ```
 
 `getLaunch` takes only a token address. It derives the candidate PoolId for each known
-quote locally and asks the hook which one exists, so there is no indexer or API in the
-read path.
+quote (and each hook generation, see below) locally and asks the hook which one exists,
+so there is no indexer or API in the read path.
 
 ```ts
 const q = await rally.quote(token, { side: "buy", amountIn: parseEther("0.1") });
@@ -282,6 +282,49 @@ await rally.ethBuy(token, {
 The v3 pool is validated against `token0`/`token1` before the transaction is built, so
 a wrong route fails locally instead of reverting `BadV3Pool` on-chain.
 
+### Hook generations
+
+Rally is a Uniswap v4 hook, and a hook address is part of every PoolKey. That means a
+protocol redeploy cannot migrate existing pools: every coin launched under an earlier hook
+stays bound to that hook, its factory and its router for life, and keeps trading there.
+The SDK handles this for you:
+
+- **Trades and creator-fee reads resolve per coin.** `getLaunch` probes every generation
+  the bundled manifest knows (`generationsOf(addresses)`: current first, then legacy
+  newest first) and records the one that owns the coin on the result as `launch.hook`,
+  `launch.router` and `launch.factory`. `quote`, `swap`, `prepareSwap*` and
+  `ethBuy` all read their targets from there, so a legacy coin's approval and swap go to
+  the legacy router with a PoolKey embedding the legacy hook. Nothing to configure.
+- **Curve and fee params come from the coin's own registry.** Every generation ships its
+  own `RallyParamRegistry`, so governance can reprice one generation without touching
+  another. `getLaunch` records it as `launch.paramRegistry`, every quote and swap reads
+  its params from there, and `getCurveParams(registry?)` / `getFeePolicy(registry?)`
+  default to the current registry (what a launch is priced against) but take a
+  generation's registry to read what a legacy coin trades under. Caches are per registry.
+- **Hosts with an indexer can skip the probe.** If you already know a coin's hook (the
+  indexer's `Launch.hookAddress`), pass it and only that hook is probed:
+
+  ```ts
+  await rally.getLaunch(token, { hook });                    // known generation: router, registry fill in
+  await rally.swap(token, { side: "buy", amountIn }, { hook });
+  await rally.getLaunch(token, { hook, router, paramRegistry }); // a hook newer than this SDK
+  ```
+
+  A hook the SDK does not know needs its `router` alongside; the router is bound to a
+  single hook, so it cannot be guessed. Pass its `paramRegistry` too (the indexer's
+  `Launch.registryAddress`), or the current registry is assumed. Every trade method
+  takes the same optional trailing `generation`.
+- **Launching always uses the current generation.** `prepareLaunch`, `launch` and
+  `predictToken` target the top-level `launchHook` / `rallyFactory` and nothing else.
+- **Referral balances are per hook.** `referralFees(quote)` and `claimReferralFees(quote)`
+  default to the current hook; pass a legacy hook as the last argument to read or claim
+  what accrued from trades on coins bound to it.
+
+A chain that has never been redeployed has no `legacyDeployments` on its address record,
+and everything above degrades to a single generation. When Rally redeploys, a new SDK
+version ships with the previous generation baked in; until you upgrade, the `{ hook,
+router }` form keeps legacy coins tradeable.
+
 ### Referral fees
 
 Every swap takes an optional `referrer`. Name your own payout address and you keep 20% ⚙
@@ -307,7 +350,9 @@ There is no registration, no allowlist and no on-chain binding between a trader 
 venue: the referrer is named per swap and you may name a different one on the next call.
 Balances are keyed by `(referrer, quote)`, not by pool, so refer trades across a hundred
 launches and claim once per quote asset. Claims are pull-only and pay `msg.sender`, so
-claim from the address you named.
+claim from the address you named. Balances live on the hook that processed the trade, so
+after a redeploy a venue with fees on both generations claims once per hook (see
+"Hook generations").
 
 Under the hood this rides in the swap's `hookData` as 32 bytes of `abi.encode(referrer)`;
 the hook rejects any other shape with `BadHookData`. Use the `referrer` option rather than
