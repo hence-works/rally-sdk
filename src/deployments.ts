@@ -32,6 +32,6 @@ export const DEPLOYMENTS: Record<number, RallyAddresses> = {
     rallyRouter: "0xB279a18fAa3f5a547F1ECb45C460293823beE7D2",
     dividendDistributor: "0xE1F1e2890CA088e08662D2344FD8391105C4e531",
     rallyVault: "0x5bd485A3059D459eA6D6DFd49fE7a2Ff2Af67C11",
-    gachaVault: "0xC794E9Ddd88C3A718fF8DF5BB885dc67a1F80Bce",
+    gachaVault: "0x937a1EDBff87165850F848F9F377D1Aa4611ba91",
   },
 };
