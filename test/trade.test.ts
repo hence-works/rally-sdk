@@ -99,6 +99,7 @@ function launchState(over: Partial<LaunchState> = {}): LaunchState {
     hook: HOOK,
     router: ROUTER,
     factory: ADDRESSES.rallyFactory,
+    paramRegistry: ADDRESSES.paramRegistry,
     ...over,
   };
 }

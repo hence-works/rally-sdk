@@ -93,12 +93,26 @@ export function createRallyClient(config: RallyClientConfig) {
       : createRallyPinner(config.metadata)
     : undefined;
 
-  const curveParams = createCache<CurveParams>(ttl, () =>
-    readCurveParams(publicClient, addresses.paramRegistry),
-  );
-  const feePolicy = createCache<FeePolicy>(ttl, () =>
-    readFeePolicy(publicClient, addresses.paramRegistry),
-  );
+  // Governance params are PER REGISTRY, and every hook generation ships its own registry,
+  // so a legacy coin's curve and fees come from its generation's registry and governance
+  // on the current one never reaches it. One TTL cache per registry address; the current
+  // registry is the default, which is what launching and the public getters want.
+  function perRegistry<T>(
+    load: (registry: Address) => Promise<T>,
+  ): (registry?: Address) => Promise<T> {
+    const caches = new Map<string, () => Promise<T>>();
+    return (registry = addresses.paramRegistry) => {
+      const key = registry.toLowerCase();
+      let hit = caches.get(key);
+      if (!hit) {
+        hit = createCache<T>(ttl, () => load(registry));
+        caches.set(key, hit);
+      }
+      return hit();
+    };
+  }
+  const curveParams = perRegistry<CurveParams>((registry) => readCurveParams(publicClient, registry));
+  const feePolicy = perRegistry<FeePolicy>((registry) => readFeePolicy(publicClient, registry));
 
   // Quote configs are per-quote and rarely change, but they carry the launch fee, so
   // they get the same TTL rather than being cached forever.
@@ -169,10 +183,18 @@ export function createRallyClient(config: RallyClientConfig) {
 
     // ───────────────────────────── reads ─────────────────────────────
 
-    /** Governance curve params (supply, allocation, fee decay, pool fee). Cached. */
-    getCurveParams: curveParams,
-    /** Governance fee policy (platform cut, creator cap, enabled mechanisms). Cached. */
-    getFeePolicy: feePolicy,
+    /**
+     * Governance curve params (supply, allocation, fee decay, pool fee). Cached per
+     * registry. Defaults to the CURRENT registry, which is what a launch is priced
+     * against; pass a generation's registry (`launch.paramRegistry`) for the values a
+     * legacy coin trades under.
+     */
+    getCurveParams: (registry?: Address) => curveParams(registry),
+    /**
+     * Governance fee policy (platform cut, creator cap, enabled mechanisms). Cached per
+     * registry; same default and override as {getCurveParams}.
+     */
+    getFeePolicy: (registry?: Address) => feePolicy(registry),
     /** A quote's allowlist entry, launch fee and graduation threshold. Cached. */
     getQuoteConfig: quoteConfig,
     /** The factory's current address-vanity pattern. */
@@ -314,7 +336,8 @@ export function createRallyClient(config: RallyClientConfig) {
       input: QuoteTradeParams,
       generation?: LaunchGeneration,
     ): Promise<TradeQuote> {
-      const [launch, params] = await Promise.all([this.getLaunch(token, generation), curveParams()]);
+      const launch = await this.getLaunch(token, generation);
+      const params = await curveParams(launch.paramRegistry);
       return quoteTradeInner(launch, params, input);
     },
 
@@ -325,7 +348,8 @@ export function createRallyClient(config: RallyClientConfig) {
       input: QuoteTradeExactOutParams,
       generation?: LaunchGeneration,
     ): Promise<TradeQuoteExactOut> {
-      const [launch, params] = await Promise.all([this.getLaunch(token, generation), curveParams()]);
+      const launch = await this.getLaunch(token, generation);
+      const params = await curveParams(launch.paramRegistry);
       return quoteTradeExactOutInner(launch, params, input);
     },
 
@@ -339,7 +363,8 @@ export function createRallyClient(config: RallyClientConfig) {
       input: PrepareSwapParams,
       generation?: LaunchGeneration,
     ): Promise<PreparedSwap> {
-      const [launch, params] = await Promise.all([this.getLaunch(token, generation), curveParams()]);
+      const launch = await this.getLaunch(token, generation);
+      const params = await curveParams(launch.paramRegistry);
       return prepareSwapInner(publicClient, addresses, launch, params, {
         trader: input.trader ?? account(),
         ...input,
@@ -390,7 +415,8 @@ export function createRallyClient(config: RallyClientConfig) {
       input: PrepareSwapExactOutParams,
       generation?: LaunchGeneration,
     ): Promise<PreparedSwapExactOut> {
-      const [launch, params] = await Promise.all([this.getLaunch(token, generation), curveParams()]);
+      const launch = await this.getLaunch(token, generation);
+      const params = await curveParams(launch.paramRegistry);
       return prepareSwapExactOutInner(publicClient, addresses, launch, params, {
         trader: input.trader ?? account(),
         ...input,

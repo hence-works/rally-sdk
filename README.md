@@ -295,18 +295,25 @@ The SDK handles this for you:
   `launch.router` and `launch.factory`. `quote`, `swap`, `prepareSwap*` and
   `ethBuy` all read their targets from there, so a legacy coin's approval and swap go to
   the legacy router with a PoolKey embedding the legacy hook. Nothing to configure.
+- **Curve and fee params come from the coin's own registry.** Every generation ships its
+  own `RallyParamRegistry`, so governance can reprice one generation without touching
+  another. `getLaunch` records it as `launch.paramRegistry`, every quote and swap reads
+  its params from there, and `getCurveParams(registry?)` / `getFeePolicy(registry?)`
+  default to the current registry (what a launch is priced against) but take a
+  generation's registry to read what a legacy coin trades under. Caches are per registry.
 - **Hosts with an indexer can skip the probe.** If you already know a coin's hook (the
   indexer's `Launch.hookAddress`), pass it and only that hook is probed:
 
   ```ts
-  await rally.getLaunch(token, { hook });                    // known generation: router fills in
+  await rally.getLaunch(token, { hook });                    // known generation: router, registry fill in
   await rally.swap(token, { side: "buy", amountIn }, { hook });
-  await rally.getLaunch(token, { hook, router });            // a hook newer than this SDK
+  await rally.getLaunch(token, { hook, router, paramRegistry }); // a hook newer than this SDK
   ```
 
   A hook the SDK does not know needs its `router` alongside; the router is bound to a
-  single hook, so it cannot be guessed. Every trade method takes the same optional
-  trailing `generation`.
+  single hook, so it cannot be guessed. Pass its `paramRegistry` too (the indexer's
+  `Launch.registryAddress`), or the current registry is assumed. Every trade method
+  takes the same optional trailing `generation`.
 - **Launching always uses the current generation.** `prepareLaunch`, `launch` and
   `predictToken` target the top-level `launchHook` / `rallyFactory` and nothing else.
 - **Referral balances are per hook.** `referralFees(quote)` and `claimReferralFees(quote)`

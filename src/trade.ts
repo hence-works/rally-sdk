@@ -147,10 +147,12 @@ export function referralHookData(referrer?: Address): Hex {
  * The generations `resolveLaunch` will probe: every one the address set knows, or just
  * the one the caller pinned.
  *
- * A pinned hook that this SDK version knows fills in its own router and factory. One it
- * does not know (a redeploy newer than the bundled manifest) needs `router` alongside:
- * the router is bound to a single hook, so guessing the current one would build swaps
- * the router rejects with `NotRallyPool`.
+ * A pinned hook that this SDK version knows fills in its own router, factory and
+ * registry. One it does not know (a redeploy newer than the bundled manifest) needs
+ * `router` alongside: the router is bound to a single hook, so guessing the current one
+ * would build swaps the router rejects with `NotRallyPool`. Its `paramRegistry` should
+ * come too; without it the current registry is assumed, which is right until governance
+ * reprices one generation and not the other.
  */
 function generationsToProbe(
   addresses: RallyAddresses,
@@ -174,6 +176,8 @@ function generationsToProbe(
       launchHook: pinned.hook,
       rallyRouter: router,
       rallyFactory: pinned.factory ?? known?.rallyFactory,
+      paramRegistry: pinned.paramRegistry ?? known?.paramRegistry ?? addresses.paramRegistry,
+      launchLib: known?.launchLib ?? addresses.launchLib,
       deploymentBlock: known?.deploymentBlock ?? 0,
     },
   ];
@@ -275,6 +279,8 @@ export async function resolveLaunch(
     hook,
     router: gen.rallyRouter,
     factory: gen.rallyFactory,
+    paramRegistry: gen.paramRegistry,
+    launchLib: gen.launchLib,
     bonded: bonded as bigint,
     gradThreshold: gradThreshold as bigint,
     launchedAt: Number(launchedAt),

@@ -90,18 +90,26 @@ function usable(value: Address | undefined): value is Address {
  * `resolveLaunch` probes these in order to find which one a coin belongs to. Entries
  * missing a hook or router are dropped rather than probed, and a zero factory reads as
  * absent, matching `requireFactory`.
+ *
+ * Every generation ships its own `RallyParamRegistry` and `LaunchLib`. A legacy entry
+ * written before the manifest carried them reads the current ones: the two were the same
+ * contracts when such a manifest was written, so this is history, not a guess.
  */
 export function generationsOf(addresses: RallyAddresses): HookGeneration[] {
   const raw: Array<{
     launchHook?: Address;
     rallyRouter?: Address;
     rallyFactory?: Address;
+    paramRegistry?: Address;
+    launchLib?: Address;
     deploymentBlock?: number;
   }> = [
     {
       launchHook: addresses.launchHook,
       rallyRouter: addresses.rallyRouter,
       rallyFactory: addresses.rallyFactory,
+      paramRegistry: addresses.paramRegistry,
+      launchLib: addresses.launchLib,
       deploymentBlock: addresses.deploymentBlock,
     },
     ...(addresses.legacyDeployments ?? []),
@@ -113,6 +121,8 @@ export function generationsOf(addresses: RallyAddresses): HookGeneration[] {
       launchHook: g.launchHook,
       rallyRouter: g.rallyRouter,
       rallyFactory: usable(g.rallyFactory) ? g.rallyFactory : undefined,
+      paramRegistry: usable(g.paramRegistry) ? g.paramRegistry : addresses.paramRegistry,
+      launchLib: usable(g.launchLib) ? g.launchLib : addresses.launchLib,
       deploymentBlock: g.deploymentBlock ?? 0,
     });
   }

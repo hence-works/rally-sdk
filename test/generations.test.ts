@@ -16,8 +16,10 @@ import {
   type Address,
   type Hex,
 } from "viem";
-import { erc20Abi, rallyHookAbi } from "../src/abis";
+import { erc20Abi, rallyFactoryAbi, rallyHookAbi, rallyParamRegistryAbi } from "../src/abis";
 import { generationForHook, generationsOf, ZERO_ADDRESS } from "../src/addresses";
+import { createRallyClient } from "../src/client";
+import { REGISTRY_KEYS } from "../src/params";
 import { RallyError } from "../src/errors";
 import { poolIdFor, poolKeyFor } from "../src/pool";
 import {
@@ -46,6 +48,11 @@ const FACTORY_V2: Address = "0xB237b78903C12B34F6cf099cf5ef701EF158BFE5";
 const HOOK_V1: Address = "0x1111111111111111111111111111111111111111";
 const ROUTER_V1: Address = "0x2222222222222222222222222222222222222222";
 const FACTORY_V1: Address = "0x3333333333333333333333333333333333333333";
+/** Each generation ships its own registry and token deployer. */
+const REGISTRY_V2: Address = "0x0B306BF915C4d645ff596e518fAf3F9669b97016";
+const LAUNCHLIB_V2: Address = "0x68B1D87F95878fE05B998F19b66F4baba5De1aed";
+const REGISTRY_V1: Address = "0x6666666666666666666666666666666666666666";
+const LAUNCHLIB_V1: Address = "0x7777777777777777777777777777777777777777";
 /** A hook this SDK version has never heard of. */
 const HOOK_UNKNOWN: Address = "0x4444444444444444444444444444444444444444";
 const ROUTER_UNKNOWN: Address = "0x5555555555555555555555555555555555555555";
@@ -56,19 +63,39 @@ const CURRENT_ONLY: RallyAddresses = {
   weth: WETH,
   usdc: USDC,
   poolManager: "0xE03A1074c86CFeDd5C142C4F04F1a1536e203543",
-  paramRegistry: "0x0B306BF915C4d645ff596e518fAf3F9669b97016",
-  launchLib: "0x68B1D87F95878fE05B998F19b66F4baba5De1aed",
+  paramRegistry: REGISTRY_V2,
+  launchLib: LAUNCHLIB_V2,
   launchHook: HOOK_V2,
   rallyFactory: FACTORY_V2,
   rallyRouter: ROUTER_V2,
 };
 
+/** A legacy entry written before the manifest carried a registry: reads the current one. */
 const WITH_LEGACY: RallyAddresses = {
   ...CURRENT_ONLY,
   legacyDeployments: [
     { launchHook: HOOK_V1, rallyFactory: FACTORY_V1, rallyRouter: ROUTER_V1, deploymentBlock: 10 },
   ],
 };
+
+/** A legacy entry with its own registry and token deployer. */
+const WITH_LEGACY_REGISTRY: RallyAddresses = {
+  ...CURRENT_ONLY,
+  legacyDeployments: [
+    {
+      launchHook: HOOK_V1,
+      rallyFactory: FACTORY_V1,
+      rallyRouter: ROUTER_V1,
+      paramRegistry: REGISTRY_V1,
+      launchLib: LAUNCHLIB_V1,
+      deploymentBlock: 10,
+    },
+  ],
+};
+
+/** The two registries disagree on total supply, so a read off the wrong one is visible. */
+const SUPPLY_V2 = 1_000_000_000n * 10n ** 18n;
+const SUPPLY_V1 = 2_000_000_000n * 10n ** 18n;
 
 const PARAMS: CurveParams = {
   totalSupply: 1_000_000_000n * 10n ** 18n,
@@ -123,6 +150,37 @@ function chainWithLaunch(liveHook: Address, quote: Address, opts: { revertUnknow
           return encodeAbiParameters(parseAbiParameters("uint256"), [0n]);
         }
 
+        // A registry read. Each registry answers with its own supply so a test can tell
+        // which one was consulted; every other key is the same on both.
+        if (target === REGISTRY_V2.toLowerCase() || target === REGISTRY_V1.toLowerCase()) {
+          const { functionName, args } = decodeFunctionData({ abi: rallyParamRegistryAbi, data });
+          calls.push({ to, fn: functionName });
+          const key = Number((args as readonly [number])[0]);
+          const v1 = target === REGISTRY_V1.toLowerCase();
+          const table: Record<number, bigint> = {
+            [REGISTRY_KEYS.TOTAL_SUPPLY]: v1 ? SUPPLY_V1 : SUPPLY_V2,
+            [REGISTRY_KEYS.CURVE_ALLOCATION]: PARAMS.curveAllocation,
+            [REGISTRY_KEYS.CURVE_FEE_START_BPS]: PARAMS.feeStartBps,
+            [REGISTRY_KEYS.CURVE_FEE_END_BPS]: PARAMS.feeEndBps,
+            [REGISTRY_KEYS.CURVE_FEE_DECAY]: PARAMS.feeDecaySeconds,
+            [REGISTRY_KEYS.POOL_FEE_BPS]: PARAMS.poolFeeBps,
+          };
+          return encodeAbiParameters(parseAbiParameters("uint256"), [table[key] ?? 0n]);
+        }
+
+        // The current factory's quote allowlist (client-level tests resolve quotes there).
+        if (target === FACTORY_V2.toLowerCase()) {
+          const { functionName, args } = decodeFunctionData({ abi: rallyFactoryAbi, data });
+          calls.push({ to, fn: functionName });
+          const q = (args as readonly [Address])[0];
+          const usdc = q.toLowerCase() === USDC.toLowerCase();
+          return encodeFunctionResult({
+            abi: rallyFactoryAbi,
+            functionName: "quotes",
+            result: [true, usdc ? 6 : 18, B, 0n, usdc ? 10n ** 30n : 10n ** 18n],
+          } as never);
+        }
+
         if (opts.revertUnknown && target === HOOK_UNKNOWN.toLowerCase()) {
           throw new Error("execution reverted");
         }
@@ -169,7 +227,14 @@ describe("generationsOf", () => {
   it("is just the current generation when the chain has never been redeployed", () => {
     const gens = generationsOf(CURRENT_ONLY);
     expect(gens).toEqual([
-      { launchHook: HOOK_V2, rallyRouter: ROUTER_V2, rallyFactory: FACTORY_V2, deploymentBlock: 100 },
+      {
+        launchHook: HOOK_V2,
+        rallyRouter: ROUTER_V2,
+        rallyFactory: FACTORY_V2,
+        paramRegistry: REGISTRY_V2,
+        launchLib: LAUNCHLIB_V2,
+        deploymentBlock: 100,
+      },
     ]);
     // An explicit empty list means the same thing as no list at all.
     expect(generationsOf({ ...CURRENT_ONLY, legacyDeployments: [] })).toEqual(gens);
@@ -202,6 +267,29 @@ describe("generationsOf", () => {
     expect(gens.every((g) => g.rallyFactory === undefined)).toBe(true);
   });
 
+  it("fills a legacy entry's missing registry and launchLib from the current ones", () => {
+    const [current, legacy] = generationsOf(WITH_LEGACY);
+    expect(current!.paramRegistry).toBe(REGISTRY_V2);
+    expect(current!.launchLib).toBe(LAUNCHLIB_V2);
+    // Written before the manifest carried them: the two were the same contracts then.
+    expect(legacy!.paramRegistry).toBe(REGISTRY_V2);
+    expect(legacy!.launchLib).toBe(LAUNCHLIB_V2);
+  });
+
+  it("keeps a legacy entry's own registry and launchLib when it has them", () => {
+    const [, legacy] = generationsOf(WITH_LEGACY_REGISTRY);
+    expect(legacy!.paramRegistry).toBe(REGISTRY_V1);
+    expect(legacy!.launchLib).toBe(LAUNCHLIB_V1);
+    // A zero address is "not carried", not a registry.
+    const zeroed: RallyAddresses = {
+      ...CURRENT_ONLY,
+      legacyDeployments: [
+        { ...WITH_LEGACY_REGISTRY.legacyDeployments![0]!, paramRegistry: ZERO_ADDRESS },
+      ],
+    };
+    expect(generationsOf(zeroed)[1]!.paramRegistry).toBe(REGISTRY_V2);
+  });
+
   it("looks a generation up by hook, case-insensitively", () => {
     expect(generationForHook(WITH_LEGACY, HOOK_V1.toLowerCase() as Address)?.rallyRouter).toBe(ROUTER_V1);
     expect(generationForHook(WITH_LEGACY, HOOK_UNKNOWN)).toBeUndefined();
@@ -230,6 +318,9 @@ describe("resolveLaunch across generations", () => {
     expect(launch.hook).toBe(HOOK_V1);
     expect(launch.router).toBe(ROUTER_V1);
     expect(launch.factory).toBe(FACTORY_V1);
+    // This entry predates registries on the manifest, so it reads the current one.
+    expect(launch.paramRegistry).toBe(REGISTRY_V2);
+    expect(launch.launchLib).toBe(LAUNCHLIB_V2);
     // The PoolKey embeds the hook, so it must be the legacy one or the PoolId is wrong.
     expect(launch.poolKey.hooks).toBe(HOOK_V1);
     expect(launch.pid).toBe(poolIdFor(poolKeyFor(USDC, TOKEN, HOOK_V1)));
@@ -272,6 +363,32 @@ describe("resolveLaunch across generations", () => {
     expect(launch.hook).toBe(HOOK_V1);
     expect(launch.router).toBe(ROUTER_V1);
     expect(launch.factory).toBe(FACTORY_V1);
+  });
+
+  it("resolves a pinned hook's registry from its generation, or takes the pinned one", async () => {
+    const { client } = chainWithLaunch(HOOK_V1, WETH);
+    const fromGeneration = await resolveLaunch(client, WITH_LEGACY_REGISTRY, TOKEN, [WETH], quoteConfig, {
+      hook: HOOK_V1,
+    });
+    expect(fromGeneration.paramRegistry).toBe(REGISTRY_V1);
+    expect(fromGeneration.launchLib).toBe(LAUNCHLIB_V1);
+
+    // A host with indexer data (Launch.registryAddress) can pin it outright, which is
+    // the only way to get it right for a hook the SDK does not know.
+    const { client: unknown } = chainWithLaunch(HOOK_UNKNOWN, WETH);
+    const pinned = await resolveLaunch(unknown, WITH_LEGACY_REGISTRY, TOKEN, [WETH], quoteConfig, {
+      hook: HOOK_UNKNOWN,
+      router: ROUTER_UNKNOWN,
+      paramRegistry: REGISTRY_V1,
+    });
+    expect(pinned.paramRegistry).toBe(REGISTRY_V1);
+    // Without a pinned registry an unknown hook falls back to the current one.
+    const { client: unknown2 } = chainWithLaunch(HOOK_UNKNOWN, WETH);
+    const assumed = await resolveLaunch(unknown2, WITH_LEGACY_REGISTRY, TOKEN, [WETH], quoteConfig, {
+      hook: HOOK_UNKNOWN,
+      router: ROUTER_UNKNOWN,
+    });
+    expect(assumed.paramRegistry).toBe(REGISTRY_V2);
   });
 
   it("accepts an unknown hook when its router comes with it", async () => {
@@ -332,6 +449,62 @@ describe("trading a legacy-generation coin", () => {
     // ...and the PoolKey the router will swap on embeds the legacy hook.
     expect(prepared.poolKey.hooks).toBe(HOOK_V1);
     expect(prepared.request.chainId).toBe(WITH_LEGACY.chainId);
+  });
+});
+
+describe("governance params per generation", () => {
+  function rally(client: PublicClientLike) {
+    return createRallyClient({ chainId: 31337, publicClient: client, addresses: WITH_LEGACY_REGISTRY });
+  }
+  const registryReads = (calls: Array<{ to: Address; fn: string }>) =>
+    [...new Set(calls.filter((c) => c.fn === "value").map((c) => c.to.toLowerCase()))];
+
+  it("prices a legacy coin off the LEGACY registry, not the current one", async () => {
+    const { client, calls } = chainWithLaunch(HOOK_V1, WETH);
+    const q = await rally(client).quote(TOKEN, { side: "buy", amountIn: 10n ** 17n, atTime: LAUNCHED_AT + 3_600 });
+
+    expect(registryReads(calls)).toEqual([REGISTRY_V1.toLowerCase()]);
+    expect(q.amountOut > 0n).toBe(true);
+  });
+
+  it("prices a current coin off the current registry", async () => {
+    const { client, calls } = chainWithLaunch(HOOK_V2, WETH);
+    await rally(client).quote(TOKEN, { side: "buy", amountIn: 10n ** 17n, atTime: LAUNCHED_AT + 3_600 });
+    expect(registryReads(calls)).toEqual([REGISTRY_V2.toLowerCase()]);
+  });
+
+  it("caches per registry: the two generations do not share values", async () => {
+    const { client, calls } = chainWithLaunch(HOOK_V2, WETH);
+    const r = rally(client);
+    const current = await r.getCurveParams();
+    const legacy = await r.getCurveParams(REGISTRY_V1);
+    expect(current.totalSupply).toBe(SUPPLY_V2);
+    expect(legacy.totalSupply).toBe(SUPPLY_V1);
+    // Second reads are cache hits: no new registry calls.
+    const before = calls.filter((c) => c.fn === "value").length;
+    await r.getCurveParams();
+    await r.getCurveParams(REGISTRY_V1);
+    expect(calls.filter((c) => c.fn === "value").length).toBe(before);
+    // Fee policy has its own cache, keyed the same way.
+    await r.getFeePolicy();
+    const afterPolicy = calls.filter((c) => c.fn === "value").length;
+    expect(afterPolicy).toBeGreaterThan(before);
+    await r.getFeePolicy();
+    expect(calls.filter((c) => c.fn === "value").length).toBe(afterPolicy);
+    expect(registryReads(calls).sort()).toEqual([REGISTRY_V2, REGISTRY_V1].map((a) => a.toLowerCase()).sort());
+  });
+
+  it("prepareSwap on a legacy coin reads params from the legacy registry and routes to the legacy router", async () => {
+    const { client, calls } = chainWithLaunch(HOOK_V1, WETH);
+    const prepared = await rally(client).prepareSwap(TOKEN, {
+      side: "buy",
+      amountIn: 10n ** 17n,
+      trader: TRADER,
+      atTime: LAUNCHED_AT + 3_600,
+    });
+    expect(registryReads(calls)).toEqual([REGISTRY_V1.toLowerCase()]);
+    expect(prepared.request.to).toBe(ROUTER_V1);
+    expect(prepared.poolKey.hooks).toBe(HOOK_V1);
   });
 });
 

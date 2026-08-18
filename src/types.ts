@@ -56,32 +56,51 @@ export interface LegacyDeployment {
   launchHook: Address;
   rallyFactory: Address;
   rallyRouter: Address;
+  /**
+   * That generation's own `RallyParamRegistry`. Every generation ships one, so a legacy
+   * coin's curve and fee params come from HERE and governance on the current registry
+   * never reaches it. Absent on entries written before the manifest carried it; the two
+   * were the same contract then, so `generationsOf` reads the current one in its place.
+   */
+  paramRegistry?: Address;
+  /**
+   * That generation's CREATE2 token deployer, the vanity `from` for its coins. Same
+   * optionality and fallback as `paramRegistry`.
+   */
+  launchLib?: Address;
   /** Block that generation was deployed at, a `fromBlock` floor for scanning its logs. */
   deploymentBlock: number;
 }
 
 /**
  * A hook generation as the SDK probes it: the current one, or a legacy one. Returned by
- * `generationsOf`, current first then legacy newest first.
+ * `generationsOf`, current first then legacy newest first, with `paramRegistry` and
+ * `launchLib` always filled (a legacy entry missing them reads the current ones).
  */
 export interface HookGeneration {
   launchHook: Address;
   rallyRouter: Address;
   /** Absent for a generation deployed before the creation path split out of the hook. */
   rallyFactory?: Address;
+  /** The registry this generation's hook reads its params from. */
+  paramRegistry: Address;
+  /** The CREATE2 deployer of this generation's tokens. */
+  launchLib: Address;
   deploymentBlock: number;
 }
 
 /**
  * A coin's known generation, for hosts that already have it (from an indexer, say) and
  * want `getLaunch` to skip probing every generation. `hook` alone is enough when it is a
- * generation this SDK version knows; pass `router` too when it is not, since the router
- * is bound to one hook and cannot be inferred from an unknown one.
+ * generation this SDK version knows: router, factory and registry fill in from it. Pass
+ * `router` too when it is not, since the router is bound to one hook and cannot be
+ * inferred from an unknown one; `paramRegistry` likewise, or the current one is assumed.
  */
 export interface LaunchGeneration {
   hook?: Address;
   router?: Address;
   factory?: Address;
+  paramRegistry?: Address;
 }
 
 /** Reads only — any viem client with a transport (`createPublicClient`, wagmi's). */
@@ -233,6 +252,14 @@ export interface LaunchState {
    * generation deployed before the creation path split out of the hook.
    */
   factory?: Address;
+  /**
+   * The `RallyParamRegistry` this coin's hook reads. Every generation has its own, so
+   * curve and fee params for this coin (`readCurveParams`, `readFeePolicy`) must come from
+   * here, not from the chain's current registry.
+   */
+  paramRegistry: Address;
+  /** The CREATE2 deployer of this coin's generation, when known. */
+  launchLib?: Address;
 }
 
 export type TradeSide = "buy" | "sell";

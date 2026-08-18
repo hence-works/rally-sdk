@@ -40,16 +40,25 @@ const field = (v) => (v === undefined ? "undefined" : JSON.stringify(v));
 // first. Absent or empty on a chain that has never been redeployed; both mean the same
 // thing, so the field is simply omitted then and `RallyAddresses.legacyDeployments`
 // stays undefined.
+//
+// Each generation ships its own ParamRegistry and LaunchLib. Entries written before the
+// manifest carried them have neither, and the SDK falls back to the top-level ones at
+// runtime (`generationsOf`), so they are baked only when present rather than copied.
 const legacy = (m) => {
   const list = Array.isArray(m.LegacyDeployments) ? m.LegacyDeployments : [];
   if (list.length === 0) return "";
   const rows = list
-    .map(
-      (g) =>
-        `      { launchHook: ${field(g.LaunchHook)}, rallyFactory: ${field(
-          g.RallyFactory,
-        )}, rallyRouter: ${field(g.RallyRouter)}, deploymentBlock: ${g.DeploymentBlock ?? 0} },`,
-    )
+    .map((g) => {
+      const parts = [
+        `launchHook: ${field(g.LaunchHook)}`,
+        `rallyFactory: ${field(g.RallyFactory)}`,
+        `rallyRouter: ${field(g.RallyRouter)}`,
+      ];
+      if (g.ParamRegistry !== undefined) parts.push(`paramRegistry: ${field(g.ParamRegistry)}`);
+      if (g.LaunchLib !== undefined) parts.push(`launchLib: ${field(g.LaunchLib)}`);
+      parts.push(`deploymentBlock: ${g.DeploymentBlock ?? 0}`);
+      return `      {\n${parts.map((p) => `        ${p},`).join("\n")}\n      },`;
+    })
     .join("\n");
   return `\n    legacyDeployments: [\n${rows}\n    ],`;
 };
