@@ -96,6 +96,9 @@ function launchState(over: Partial<LaunchState> = {}): LaunchState {
     feeSplit: { creatorBps: 10_000, dividendBps: 0, buybackBps: 0, lpSupportBps: 0 },
     quoteIsCurrency0: sortCurrencies(WETH, TOKEN).quoteIsCurrency0,
     poolKey,
+    hook: HOOK,
+    router: ROUTER,
+    factory: ADDRESSES.rallyFactory,
     ...over,
   };
 }

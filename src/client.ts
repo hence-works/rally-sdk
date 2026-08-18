@@ -47,6 +47,7 @@ import {
 import type {
   CurveParams,
   FeePolicy,
+  LaunchGeneration,
   LaunchState,
   PublicClientLike,
   QuoteConfig,
@@ -186,12 +187,17 @@ export function createRallyClient(config: RallyClientConfig) {
 
     /**
      * Full on-chain state of a launch, found from just its token address: the SDK
-     * derives the candidate PoolId for each known quote locally and asks the hook which
-     * one exists, so no indexer is involved.
+     * derives the candidate PoolId for each (hook generation, quote) pair locally and asks
+     * each hook whether its pool exists, so no indexer is involved. The generation that
+     * answers is recorded on the result (`hook`, `router`, `factory`), and every trade
+     * built from it targets that generation, not the chain's current one.
+     *
+     * A host that already knows the coin's hook (an indexer's `Launch.hookAddress`) can
+     * pass it as `generation` to probe only that hook. The quote is still probed.
      */
-    getLaunch(token: Address): Promise<LaunchState> {
+    getLaunch(token: Address, generation?: LaunchGeneration): Promise<LaunchState> {
       const candidates = (config.quotes ?? [addresses.weth, addresses.usdc].filter(Boolean)) as Address[];
-      return resolveLaunch(publicClient, addresses, token, candidates, quoteConfig);
+      return resolveLaunch(publicClient, addresses, token, candidates, quoteConfig, generation);
     },
 
     // ──────────────────────────── launching ────────────────────────────
@@ -303,8 +309,12 @@ export function createRallyClient(config: RallyClientConfig) {
     // ───────────────────────────── trading ─────────────────────────────
 
     /** Price an exact-input trade. Pure once the launch state is in hand. */
-    async quote(token: Address, input: QuoteTradeParams): Promise<TradeQuote> {
-      const [launch, params] = await Promise.all([this.getLaunch(token), curveParams()]);
+    async quote(
+      token: Address,
+      input: QuoteTradeParams,
+      generation?: LaunchGeneration,
+    ): Promise<TradeQuote> {
+      const [launch, params] = await Promise.all([this.getLaunch(token, generation), curveParams()]);
       return quoteTradeInner(launch, params, input);
     },
 
@@ -313,14 +323,23 @@ export function createRallyClient(config: RallyClientConfig) {
     async quoteExactOut(
       token: Address,
       input: QuoteTradeExactOutParams,
+      generation?: LaunchGeneration,
     ): Promise<TradeQuoteExactOut> {
-      const [launch, params] = await Promise.all([this.getLaunch(token), curveParams()]);
+      const [launch, params] = await Promise.all([this.getLaunch(token, generation), curveParams()]);
       return quoteTradeExactOutInner(launch, params, input);
     },
 
-    /** Build an unsigned swap (plus the approval it needs), without sending. */
-    async prepareSwap(token: Address, input: PrepareSwapParams): Promise<PreparedSwap> {
-      const [launch, params] = await Promise.all([this.getLaunch(token), curveParams()]);
+    /**
+     * Build an unsigned swap (plus the approval it needs), without sending. Both target
+     * the router of the coin's own hook generation (see {getLaunch}); `generation` skips
+     * the generation probe when the host already knows it.
+     */
+    async prepareSwap(
+      token: Address,
+      input: PrepareSwapParams,
+      generation?: LaunchGeneration,
+    ): Promise<PreparedSwap> {
+      const [launch, params] = await Promise.all([this.getLaunch(token, generation), curveParams()]);
       return prepareSwapInner(publicClient, addresses, launch, params, {
         trader: input.trader ?? account(),
         ...input,
@@ -331,11 +350,12 @@ export function createRallyClient(config: RallyClientConfig) {
     async swap(
       token: Address,
       input: PrepareSwapParams & { onStep?: (step: SwapStep) => void },
+      generation?: LaunchGeneration,
     ): Promise<{ hash: Hex; receipt: TransactionReceipt; quote: TradeQuote }> {
       requireWallet();
       const step = input.onStep ?? (() => {});
       step("quoting");
-      const prepared = await this.prepareSwap(token, input);
+      const prepared = await this.prepareSwap(token, input, generation);
 
       if (prepared.approval) {
         step("approving");
@@ -368,8 +388,9 @@ export function createRallyClient(config: RallyClientConfig) {
     async prepareSwapExactOut(
       token: Address,
       input: PrepareSwapExactOutParams,
+      generation?: LaunchGeneration,
     ): Promise<PreparedSwapExactOut> {
-      const [launch, params] = await Promise.all([this.getLaunch(token), curveParams()]);
+      const [launch, params] = await Promise.all([this.getLaunch(token, generation), curveParams()]);
       return prepareSwapExactOutInner(publicClient, addresses, launch, params, {
         trader: input.trader ?? account(),
         ...input,
@@ -380,11 +401,12 @@ export function createRallyClient(config: RallyClientConfig) {
     async swapExactOut(
       token: Address,
       input: PrepareSwapExactOutParams & { onStep?: (step: SwapStep) => void },
+      generation?: LaunchGeneration,
     ): Promise<{ hash: Hex; receipt: TransactionReceipt; quote: TradeQuoteExactOut }> {
       requireWallet();
       const step = input.onStep ?? (() => {});
       step("quoting");
-      const prepared = await this.prepareSwapExactOut(token, input);
+      const prepared = await this.prepareSwapExactOut(token, input, generation);
 
       if (prepared.approval) {
         step("approving");
@@ -414,16 +436,16 @@ export function createRallyClient(config: RallyClientConfig) {
      * Buy a non-wETH-quoted launch with native ETH in one transaction (ETH → quote on a
      * Uniswap v3 pool → the curve). No approvals, no holding the quote asset.
      */
-    async prepareEthBuy(token: Address, input: PrepareEthBuyParams) {
-      const launch = await this.getLaunch(token);
+    async prepareEthBuy(token: Address, input: PrepareEthBuyParams, generation?: LaunchGeneration) {
+      const launch = await this.getLaunch(token, generation);
       const route =
         config.ethRoutes?.[launch.quote.address.toLowerCase()] ??
         defaultEthRoute(addresses.chainId, launch.quote.address);
       return prepareEthBuyInner(publicClient, addresses, launch, input, route);
     },
 
-    async ethBuy(token: Address, input: PrepareEthBuyParams) {
-      const prepared = await this.prepareEthBuy(token, input);
+    async ethBuy(token: Address, input: PrepareEthBuyParams, generation?: LaunchGeneration) {
+      const prepared = await this.prepareEthBuy(token, input, generation);
       const { hash, receipt } = await send(prepared.request);
       return { ...prepared, hash, receipt };
     },
@@ -434,8 +456,12 @@ export function createRallyClient(config: RallyClientConfig) {
      * Referral fees earned in `quote` and not yet claimed. Defaults to the configured
      * wallet's account, which is the address a venue would normally have been naming as
      * the `referrer` on its swaps.
+     *
+     * Balances are per hook: fees from trades on coins bound to a legacy generation sit
+     * on that generation's hook. Defaults to the current hook; pass `hook` (a
+     * `LaunchState.hook`, or an entry of `generationsOf(addresses)`) for a legacy one.
      */
-    referralFees(quote: Address, referrer?: Address): Promise<bigint> {
+    referralFees(quote: Address, referrer?: Address, hook?: Address): Promise<bigint> {
       const who = referrer ?? account();
       if (!who) {
         throw new RallyError(
@@ -444,12 +470,12 @@ export function createRallyClient(config: RallyClientConfig) {
             "referral balance for.",
         );
       }
-      return readReferralFeesInner(publicClient, addresses, who, quote);
+      return readReferralFeesInner(publicClient, addresses, who, quote, hook);
     },
 
-    /** Unsigned `claimReferralFees(quote)`. Pays whoever signs it. */
-    prepareClaimReferralFees(quote: Address): TxRequest {
-      return prepareClaimReferralFeesInner(addresses, quote);
+    /** Unsigned `claimReferralFees(quote)` on the current hook, or on `hook`. Pays whoever signs it. */
+    prepareClaimReferralFees(quote: Address, hook?: Address): TxRequest {
+      return prepareClaimReferralFeesInner(addresses, quote, hook);
     },
 
     /**
@@ -458,10 +484,10 @@ export function createRallyClient(config: RallyClientConfig) {
      * landing between the read and the claim are included in the payout but not in this
      * figure, so treat it as a floor rather than an exact receipt.
      */
-    async claimReferralFees(quote: Address) {
+    async claimReferralFees(quote: Address, hook?: Address) {
       requireWallet();
-      const amount = await this.referralFees(quote);
-      const { hash, receipt } = await send(this.prepareClaimReferralFees(quote));
+      const amount = await this.referralFees(quote, undefined, hook);
+      const { hash, receipt } = await send(this.prepareClaimReferralFees(quote, hook));
       return { hash, receipt, amount };
     },
 

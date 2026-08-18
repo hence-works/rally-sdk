@@ -9,7 +9,7 @@
 import { isAddress, type Address } from "viem";
 import { DEPLOYMENTS } from "./deployments";
 import { RallyError } from "./errors";
-import type { RallyAddresses } from "./types";
+import type { HookGeneration, RallyAddresses } from "./types";
 
 export const ZERO_ADDRESS: Address = "0x0000000000000000000000000000000000000000";
 
@@ -74,6 +74,58 @@ export function requireFactory(addresses: RallyAddresses): Address {
     );
   }
   return factory;
+}
+
+/** A usable, non-zero address. */
+function usable(value: Address | undefined): value is Address {
+  return Boolean(value) && isAddress(value as string) && value !== ZERO_ADDRESS;
+}
+
+/**
+ * Every hook generation live on a chain: the current one first, then each legacy one
+ * newest first (the order `legacyDeployments` is written in).
+ *
+ * A v4 hook is part of every PoolKey, so a redeploy cannot migrate pools: coins launched
+ * under an earlier generation keep trading against that generation's hook and router.
+ * `resolveLaunch` probes these in order to find which one a coin belongs to. Entries
+ * missing a hook or router are dropped rather than probed, and a zero factory reads as
+ * absent, matching `requireFactory`.
+ */
+export function generationsOf(addresses: RallyAddresses): HookGeneration[] {
+  const raw: Array<{
+    launchHook?: Address;
+    rallyRouter?: Address;
+    rallyFactory?: Address;
+    deploymentBlock?: number;
+  }> = [
+    {
+      launchHook: addresses.launchHook,
+      rallyRouter: addresses.rallyRouter,
+      rallyFactory: addresses.rallyFactory,
+      deploymentBlock: addresses.deploymentBlock,
+    },
+    ...(addresses.legacyDeployments ?? []),
+  ];
+  const out: HookGeneration[] = [];
+  for (const g of raw) {
+    if (!usable(g.launchHook) || !usable(g.rallyRouter)) continue;
+    out.push({
+      launchHook: g.launchHook,
+      rallyRouter: g.rallyRouter,
+      rallyFactory: usable(g.rallyFactory) ? g.rallyFactory : undefined,
+      deploymentBlock: g.deploymentBlock ?? 0,
+    });
+  }
+  return out;
+}
+
+/** The generation whose hook is `hook` (case-insensitive), or undefined if unknown. */
+export function generationForHook(
+  addresses: RallyAddresses,
+  hook: Address,
+): HookGeneration | undefined {
+  const wanted = hook.toLowerCase();
+  return generationsOf(addresses).find((g) => g.launchHook.toLowerCase() === wanted);
 }
 
 /**

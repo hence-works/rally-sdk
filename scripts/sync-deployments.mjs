@@ -35,6 +35,25 @@ const entries = files.map((f) => {
 });
 
 const field = (v) => (v === undefined ? "undefined" : JSON.stringify(v));
+
+// `LegacyDeployments`: every previous hook generation still live on the chain, newest
+// first. Absent or empty on a chain that has never been redeployed; both mean the same
+// thing, so the field is simply omitted then and `RallyAddresses.legacyDeployments`
+// stays undefined.
+const legacy = (m) => {
+  const list = Array.isArray(m.LegacyDeployments) ? m.LegacyDeployments : [];
+  if (list.length === 0) return "";
+  const rows = list
+    .map(
+      (g) =>
+        `      { launchHook: ${field(g.LaunchHook)}, rallyFactory: ${field(
+          g.RallyFactory,
+        )}, rallyRouter: ${field(g.RallyRouter)}, deploymentBlock: ${g.DeploymentBlock ?? 0} },`,
+    )
+    .join("\n");
+  return `\n    legacyDeployments: [\n${rows}\n    ],`;
+};
+
 const body = entries
   .map(
     ([chainId, m]) => `  ${chainId}: {
@@ -50,7 +69,7 @@ const body = entries
     rallyRouter: ${field(m.RallyRouter)},
     dividendDistributor: ${field(m.DividendDistributor)},
     rallyVault: ${field(m.RallyVault)},
-    gachaVault: ${field(m.GachaVault)},
+    gachaVault: ${field(m.GachaVault)},${legacy(m)}
   },`,
   )
   .join("\n");

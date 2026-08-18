@@ -22,7 +22,7 @@
 import { encodeAbiParameters, encodeFunctionData, parseAbi, type Address, type Hex } from "viem";
 import { getBlock, readContract } from "viem/actions";
 import { erc20Abi, rallyHookAbi, rallyRouterAbi, uniswapV3PoolAbi } from "./abis";
-import { ZERO_ADDRESS } from "./addresses";
+import { generationForHook, generationsOf, ZERO_ADDRESS } from "./addresses";
 import { RallyError } from "./errors";
 import { poolIdFor, poolKeyFor, sortCurrencies, V4, type PoolKey } from "./pool";
 import {
@@ -41,6 +41,8 @@ import {
 } from "./curve";
 import type {
   CurveParams,
+  HookGeneration,
+  LaunchGeneration,
   LaunchState,
   Phase,
   PublicClientLike,
@@ -142,12 +144,59 @@ export function referralHookData(referrer?: Address): Hex {
 }
 
 /**
- * Find which allowlisted quote a token launched against, then read its full state.
+ * The generations `resolveLaunch` will probe: every one the address set knows, or just
+ * the one the caller pinned.
+ *
+ * A pinned hook that this SDK version knows fills in its own router and factory. One it
+ * does not know (a redeploy newer than the bundled manifest) needs `router` alongside:
+ * the router is bound to a single hook, so guessing the current one would build swaps
+ * the router rejects with `NotRallyPool`.
+ */
+function generationsToProbe(
+  addresses: RallyAddresses,
+  pinned: LaunchGeneration | undefined,
+): HookGeneration[] {
+  if (!pinned?.hook) return generationsOf(addresses);
+  const known = generationForHook(addresses, pinned.hook);
+  const router = pinned.router ?? known?.rallyRouter;
+  if (!router) {
+    throw new RallyError(
+      "MISSING_ADDRESS",
+      `Hook ${pinned.hook} is not a generation this SDK knows on chain ${addresses.chainId} ` +
+        `(known: ${generationsOf(addresses)
+          .map((g) => g.launchHook)
+          .join(", ")}). Pass its \`router\` alongside \`hook\`, or upgrade the SDK.`,
+      { details: { chainId: addresses.chainId, hook: pinned.hook } },
+    );
+  }
+  return [
+    {
+      launchHook: pinned.hook,
+      rallyRouter: router,
+      rallyFactory: pinned.factory ?? known?.rallyFactory,
+      deploymentBlock: known?.deploymentBlock ?? 0,
+    },
+  ];
+}
+
+/**
+ * Find which hook generation and allowlisted quote a token launched against, then read
+ * its full state.
  *
  * A third-party venue knows a token address, not a PoolId — and the PoolId depends on
- * the quote. Rather than requiring an indexer round-trip, this derives the candidate
- * PoolId locally for each known quote and asks the hook which one exists. With two
- * allowlisted quotes that is two `eth_call`s and no external dependency.
+ * the quote AND on the hook, since a v4 hook is part of every PoolKey. Rather than
+ * requiring an indexer round-trip, this derives the candidate PoolId locally for each
+ * (generation, quote) pair and asks each hook whether its pool exists, all in one batch.
+ * With one generation and two allowlisted quotes that is two `eth_call`s and no external
+ * dependency; each legacy generation adds one call per quote.
+ *
+ * A coin launched under an earlier generation stays bound to that hook and router for
+ * life, so the generation that answers is recorded on the result (`hook`, `router`,
+ * `factory`) and every trade path reads its targets from there, never from the chain's
+ * current addresses.
+ *
+ * `generation` lets a host that already knows the coin's hook (from an indexer) probe
+ * only that hook. The quote is still probed; the generation is not.
  */
 export async function resolveLaunch(
   client: PublicClientLike,
@@ -155,15 +204,20 @@ export async function resolveLaunch(
   token: Address,
   candidateQuotes: Address[],
   quoteConfig: (quote: Address) => Promise<QuoteConfig>,
+  generation?: LaunchGeneration,
 ): Promise<LaunchState> {
-  const candidates = candidateQuotes.map((quote) => ({
-    quote,
-    key: poolKeyFor(quote, token, addresses.launchHook),
-  }));
+  const generations = generationsToProbe(addresses, generation);
+  const candidates = generations.flatMap((gen) =>
+    candidateQuotes.map((quote) => ({
+      gen,
+      quote,
+      key: poolKeyFor(quote, token, gen.launchHook),
+    })),
+  );
   const phases = await Promise.all(
-    candidates.map(({ key }) =>
+    candidates.map(({ gen, key }) =>
       readContract(client, {
-        address: addresses.launchHook,
+        address: gen.launchHook,
         abi: rallyHookAbi,
         functionName: "phaseOf",
         args: [poolIdFor(key)],
@@ -173,35 +227,40 @@ export async function resolveLaunch(
 
   const found = candidates.findIndex((_, i) => Number(phases[i]) !== 0);
   if (found === -1) {
+    const hooks = generations.map((g) => g.launchHook);
     throw new RallyError(
       "LAUNCH_NOT_FOUND",
       `No Rally launch for ${token} against any known quote on chain ${addresses.chainId}. ` +
-        `Tried: ${candidateQuotes.join(", ")}. If it launched against a newer quote, add it ` +
-        `via \`quotes\` on createRallyClient.`,
-      { details: { token, candidateQuotes } },
+        `Tried ${hooks.length} hook generation${hooks.length === 1 ? "" : "s"} (${hooks.join(
+          ", ",
+        )}) x quotes ${candidateQuotes.join(", ")}. If it launched against a newer quote, ` +
+        `add it via \`quotes\` on createRallyClient; if under a hook this SDK does not ` +
+        `know, pass its generation to getLaunch or upgrade the SDK.`,
+      { details: { token, candidateQuotes, hooks } },
     );
   }
 
-  const { quote: quoteAddress, key } = candidates[found]!;
+  const { gen, quote: quoteAddress, key } = candidates[found]!;
+  const hook = gen.launchHook;
   const pid = poolIdFor(key);
   const phase = PHASES[Number(phases[found])] ?? "NONE";
 
   const [quote, bonded, gradThreshold, launchedAt, graduatedAt, poolPriceWad, reserves, feeSplit] =
     await Promise.all([
       quoteConfig(quoteAddress),
-      read(client, addresses.launchHook, "bonded", pid),
-      read(client, addresses.launchHook, "gradThreshold", pid),
-      read(client, addresses.launchHook, "launchedAt", pid),
-      read(client, addresses.launchHook, "graduatedAt", pid),
-      read(client, addresses.launchHook, "poolPriceWad", pid),
+      read(client, hook, "bonded", pid),
+      read(client, hook, "gradThreshold", pid),
+      read(client, hook, "launchedAt", pid),
+      read(client, hook, "graduatedAt", pid),
+      read(client, hook, "poolPriceWad", pid),
       readContract(client, {
-        address: addresses.launchHook,
+        address: hook,
         abi: rallyHookAbi,
         functionName: "poolReserves",
         args: [pid],
       }),
       readContract(client, {
-        address: addresses.launchHook,
+        address: hook,
         abi: rallyHookAbi,
         functionName: "feeConfigOf",
         args: [pid],
@@ -213,6 +272,9 @@ export async function resolveLaunch(
     pid,
     quote,
     phase,
+    hook,
+    router: gen.rallyRouter,
+    factory: gen.rallyFactory,
     bonded: bonded as bigint,
     gradThreshold: gradThreshold as bigint,
     launchedAt: Number(launchedAt),
@@ -581,7 +643,7 @@ export async function prepareSwap(
       address: inputToken,
       abi: erc20Abi,
       functionName: "allowance",
-      args: [trader, addresses.rallyRouter],
+      args: [trader, launch.router],
     });
     if (allowance < input.amountIn) {
       approval = {
@@ -589,7 +651,7 @@ export async function prepareSwap(
         data: encodeFunctionData({
           abi: erc20Abi,
           functionName: "approve",
-          args: [addresses.rallyRouter, input.approveMax ? MAX_UINT256 : input.amountIn],
+          args: [launch.router, input.approveMax ? MAX_UINT256 : input.amountIn],
         }),
         value: 0n,
         chainId: addresses.chainId,
@@ -624,7 +686,7 @@ export async function prepareSwap(
     quote,
     approval,
     request: {
-      to: addresses.rallyRouter,
+      to: launch.router,
       data,
       value: payWithEth ? input.amountIn : 0n,
       chainId: addresses.chainId,
@@ -758,7 +820,7 @@ export async function prepareSwapExactOut(
       address: inputToken,
       abi: erc20Abi,
       functionName: "allowance",
-      args: [trader, addresses.rallyRouter],
+      args: [trader, launch.router],
     });
     if (allowance < maxAmountIn) {
       approval = {
@@ -766,7 +828,7 @@ export async function prepareSwapExactOut(
         data: encodeFunctionData({
           abi: erc20Abi,
           functionName: "approve",
-          args: [addresses.rallyRouter, input.approveMax ? MAX_UINT256 : maxAmountIn],
+          args: [launch.router, input.approveMax ? MAX_UINT256 : maxAmountIn],
         }),
         value: 0n,
         chainId: addresses.chainId,
@@ -802,7 +864,7 @@ export async function prepareSwapExactOut(
     quote,
     approval,
     request: {
-      to: addresses.rallyRouter,
+      to: launch.router,
       data,
       // Send the ceiling, not the estimate: the router wraps `msg.value`, spends what the
       // swap costs and refunds the rest, so under-sending is the only way to fail here.
@@ -970,7 +1032,7 @@ export async function prepareEthBuy(
     deadline,
     zeroForOne,
     request: {
-      to: addresses.rallyRouter,
+      to: launch.router,
       data: encodeFunctionData({
         abi: rallyRouterAbi,
         functionName: "swapExactEthIn",
@@ -998,15 +1060,21 @@ export async function prepareEthBuy(
  * Per quote, not per pool: a venue that referred trades on twenty launches quoted in wETH
  * has one wETH balance. Read it once per quote you have referred trades in, which for most
  * integrators is one or two.
+ *
+ * Per HOOK, though: the balance accrues on the hook that processed the trade, so fees
+ * from trades on coins bound to a legacy generation sit on that generation's hook.
+ * `hook` defaults to the chain's current hook; pass a legacy one (`LaunchState.hook`,
+ * or an entry of `generationsOf`) to read what accrued there.
  */
 export function readReferralFees(
   client: PublicClientLike,
   addresses: RallyAddresses,
   referrer: Address,
   quote: Address,
+  hook: Address = addresses.launchHook,
 ): Promise<bigint> {
   return readContract(client, {
-    address: addresses.launchHook,
+    address: hook,
     abi: rallyHookAbi,
     functionName: "referralFeesOwed",
     args: [referrer, quote],
@@ -1021,13 +1089,17 @@ export function readReferralFees(
  * from a different account claims that account's balance, which is usually zero rather
  * than an error, so check {readReferralFees} for the signer first if a claim comes back
  * empty.
+ *
+ * Targets the chain's current hook unless `hook` names a legacy generation; balances are
+ * per hook, so a venue with fees on both claims once from each. See {readReferralFees}.
  */
 export function prepareClaimReferralFees(
   addresses: RallyAddresses,
   quote: Address,
+  hook: Address = addresses.launchHook,
 ): TxRequest {
   return {
-    to: addresses.launchHook,
+    to: hook,
     data: encodeFunctionData({
       abi: rallyHookAbi,
       functionName: "claimReferralFees",
