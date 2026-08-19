@@ -4,7 +4,12 @@
  */
 import { describe, expect, it } from "vitest";
 import { keccak256, toHex, type Address } from "viem";
-import { parseLaunchReceipt, validateFeeSplit } from "../src/launch";
+import {
+  parseLaunchReceipt,
+  validateFeeSplit,
+  validateLaunchMetadataDocument,
+  validateMetadataURI,
+} from "../src/launch";
 import { applySlippage, toleranceFor, EXACT_SLIPPAGE_BPS, APPROX_SLIPPAGE_BPS } from "../src/trade";
 import { RallyError } from "../src/errors";
 import type { FeePolicy } from "../src/types";
@@ -17,6 +22,161 @@ const OPEN: FeePolicy = {
   buybackEnabled: true,
   lpSupportEnabled: true,
 };
+
+/** A complete document, the shape Rally pins and every venue reads. */
+const DOC = {
+  name: "Good Dog",
+  symbol: "WOOF",
+  imageUrl: "https://cdn.example.com/woof.png",
+  description: "he is a good dog",
+  website: "https://gooddog.example",
+  twitter: "@gooddog",
+  telegram: "gooddog",
+};
+
+/** The two encodings a `data:` URI can carry, so both paths are exercised. */
+function inlineURI(doc: unknown, encoding: "percent" | "base64" = "percent"): string {
+  const json = JSON.stringify(doc);
+  return encoding === "base64"
+    ? `data:application/json;base64,${Buffer.from(json, "utf8").toString("base64")}`
+    : `data:application/json,${encodeURIComponent(json)}`;
+}
+
+describe("validateLaunchMetadataDocument", () => {
+  it("returns the document normalized, with blank optionals dropped", () => {
+    expect(
+      validateLaunchMetadataDocument({ ...DOC, website: "  ", telegram: "" }),
+    ).toEqual({
+      name: "Good Dog",
+      symbol: "WOOF",
+      imageUrl: "https://cdn.example.com/woof.png",
+      description: "he is a good dog",
+      twitter: "@gooddog",
+    });
+  });
+
+  it("accepts `image` as an alias and an ipfs logo", () => {
+    const { imageUrl: _drop, ...rest } = DOC;
+    expect(
+      validateLaunchMetadataDocument({ ...rest, image: "ipfs://bafyfoo/logo.png" }).imageUrl,
+    ).toBe("ipfs://bafyfoo/logo.png");
+  });
+
+  it("leaves unknown keys alone", () => {
+    expect(() =>
+      validateLaunchMetadataDocument({ ...DOC, fee_recipient: "0xabc", decimals: 18 }),
+    ).not.toThrow();
+  });
+
+  it.each(["name", "symbol", "imageUrl"])("requires %s", (field) => {
+    const doc: Record<string, unknown> = { ...DOC };
+    delete doc[field];
+    expect(() => validateLaunchMetadataDocument(doc)).toThrow(RallyError);
+  });
+
+  it("rejects a blank required field", () => {
+    expect(() => validateLaunchMetadataDocument({ ...DOC, name: "   " })).toThrow(/required/);
+  });
+
+  it("rejects a non-string field", () => {
+    expect(() => validateLaunchMetadataDocument({ ...DOC, description: 42 })).toThrow(
+      /must be a string/,
+    );
+  });
+
+  it("rejects a document that isn't an object", () => {
+    expect(() => validateLaunchMetadataDocument([DOC])).toThrow(RallyError);
+    expect(() => validateLaunchMetadataDocument("nope")).toThrow(RallyError);
+  });
+
+  // Each of these renders as nothing downstream, so it fails here instead.
+  it.each([
+    ["a data: logo", { imageUrl: "data:image/png;base64,iVBOR" }],
+    ["an http logo", { imageUrl: "http://cdn.example.com/woof.png" }],
+    ["a scheme-less website", { website: "gooddog.example" }],
+    ["a website that isn't a link", { website: "javascript:alert(1)" }],
+    ["a handle carrying a scheme", { twitter: "javascript:alert(1)" }],
+    ["a handle carrying a path", { telegram: "t.me/gooddog" }],
+  ])("rejects %s", (_label, patch) => {
+    expect(() => validateLaunchMetadataDocument({ ...DOC, ...patch })).toThrow(RallyError);
+  });
+
+  it("accepts a social given as a full URL", () => {
+    expect(
+      validateLaunchMetadataDocument({ ...DOC, twitter: "https://x.com/gooddog" }).twitter,
+    ).toBe("https://x.com/gooddog");
+  });
+
+  it("rejects a field past the length the read models store", () => {
+    expect(() => validateLaunchMetadataDocument({ ...DOC, name: "a".repeat(129) })).toThrow(
+      /limit is 128/,
+    );
+  });
+});
+
+describe("validateMetadataURI", () => {
+  // The three forms a consumer can still dereference years after the launch.
+  it.each([
+    "https://assets.rallypad.fun/4663/0xabc.json",
+    "ipfs://bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi",
+    "ipfs://QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG/metadata.json",
+    inlineURI(DOC),
+    inlineURI(DOC, "base64"),
+  ])("accepts %s", (uri) => {
+    expect(validateMetadataURI(uri)).toBe(uri);
+  });
+
+  it("trims", () => {
+    const uri = "ipfs://bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi";
+    expect(validateMetadataURI(`  ${uri}  `)).toBe(uri);
+  });
+
+  // `ipfs://rallypad` and `ipfs://noodle` are both frozen onto real tokens on 4663.
+  it.each([
+    "ipfs://",
+    "https://",
+    "  ",
+    "ipfs://rallypad",
+    "ipfs://noodle",
+  ])("rejects the placeholder %s", (uri) => {
+    expect(() => validateMetadataURI(uri)).toThrow(RallyError);
+  });
+
+  it("rejects http://, since mixed content is a dead logo", () => {
+    expect(() => validateMetadataURI("http://example.com/meta.json")).toThrow(/https:/);
+  });
+
+  it("checks the document an inline URI carries", () => {
+    const { symbol: _drop, ...noSymbol } = DOC;
+    expect(() => validateMetadataURI(inlineURI(noSymbol))).toThrow(/symbol/);
+    expect(() => validateMetadataURI(inlineURI({ ...DOC, website: "gooddog.example" }))).toThrow(
+      /website/,
+    );
+    // The document that shipped on 0x1f607ea2: socials and a description, no identity.
+    expect(() =>
+      validateMetadataURI(
+        "data:application/json,%7B%22website%22%3A%22%22%2C%22description%22%3A%22Rally%22%2C%22twitter%22%3A%22%22%7D",
+      ),
+    ).toThrow(/name/);
+  });
+
+  it("decodes multibyte characters out of a base64 document", () => {
+    const doc = { ...DOC, description: "he is a good dog — really" };
+    expect(validateMetadataURI(inlineURI(doc, "base64"))).toContain("data:application/json;base64,");
+  });
+
+  it("rejects an inline URI with no document", () => {
+    expect(() => validateMetadataURI("data:application/json,")).toThrow(/JSON document/);
+  });
+
+  it("rejects a non-JSON data URI", () => {
+    expect(() => validateMetadataURI("data:text/plain,hello")).toThrow(RallyError);
+  });
+
+  it("rejects a bare name", () => {
+    expect(() => validateMetadataURI("noodle")).toThrow(RallyError);
+  });
+});
 
 describe("validateFeeSplit", () => {
   it("accepts a split that sums to 10000", () => {

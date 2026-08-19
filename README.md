@@ -142,10 +142,35 @@ A pinned blob needs `name`, `symbol` and `imageUrl` — `name` and `symbol` defa
 the launch's own, so in practice only the logo has to be supplied. Everything else
 (`description`, `bannerUrl`, socials) is optional.
 
-Rally pins at `/<chainId>/<token>.json`. If you host it yourself, any URL works — the
-contract only stores the string. Already hold a session? Pass `metadata.token` and no
-signature is requested. Want your own storage entirely? Pass an object implementing
-`MetadataPinner` as `metadata`.
+Rally pins at `/<chainId>/<token>.json`. Already hold a session? Pass `metadata.token`
+and no signature is requested. Want your own storage entirely? Pass an object
+implementing `MetadataPinner` as `metadata`.
+
+If you host the JSON yourself, `metadataURI` must be `https://`, `ipfs://`, or an
+inline `data:application/json,...` document. The contract stores whatever string you
+give it, forever, so `validateMetadataURI` refuses the forms that can never resolve
+(`http://`, a bare `ipfs://` with no CID, a filename). Two consequences worth planning
+around:
+
+- **Rally's own surfaces do not fetch your URL.** They resolve a coin's name, logo and
+  socials from Rally's pinning bucket, keyed by `(chainId, token)`, or by decoding an
+  inline `data:` URI. An indexer dereferencing creator supplied hosts would be an SSRF
+  rail, so it does not. Your venue renders your document fine; on Rally the coin shows
+  as a bare address unless you pin through the service or inline the JSON.
+- **Inline is the durable self hosted option.** `data:application/json,` plus the
+  encoded document costs calldata once and can never 404:
+
+  ```ts
+  metadataURI: `data:application/json,${encodeURIComponent(JSON.stringify(doc))}`,
+  ```
+
+  It is also the only form whose document the SDK can see, so it is checked against
+  the metadata schema before the grind starts. `name`, `symbol` and `imageUrl` are
+  required; `description`, `bannerUrl`, `website`, `twitter` and `telegram` are
+  optional; unknown keys are left alone. Logos take `https://` or `ipfs://` (a nested
+  `data:` image is dropped by every read model, so it is refused), `website` must be an
+  absolute http(s) URL, and socials take a bare handle or a full URL. `validateLaunchMetadataDocument`
+  is exported if you want the same check over a document you host elsewhere.
 
 ### Vanity mining
 

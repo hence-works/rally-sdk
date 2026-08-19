@@ -107,6 +107,8 @@ export {
   readQuoteConfig,
   readTokenVanity,
   validateFeeSplit,
+  validateLaunchMetadataDocument,
+  validateMetadataURI,
 } from "./launch";
 export type { LaunchParams, LaunchResult, PreparedLaunch } from "./launch";
 

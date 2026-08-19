@@ -54,7 +54,12 @@ export interface LaunchParams {
    * default is resolved on-chain rather than guessed here.
    */
   fees?: FeeSplit;
-  /** An already-hosted metadata JSON. Mutually exclusive with `metadata`. */
+  /**
+   * An already-hosted metadata JSON. Mutually exclusive with `metadata`. Must be
+   * `https://`, `ipfs://`, or an inline `data:application/json` URI. See
+   * {@link validateMetadataURI}, which also explains what renders on Rally's own
+   * surfaces and what does not.
+   */
   metadataURI?: string;
   /**
    * Metadata to pin through the configured service. Mutually exclusive with
@@ -198,13 +203,268 @@ export function validateFeeSplit(fees: FeeSplit, policy: FeePolicy): void {
 }
 
 /**
+ * Caps on every field of a metadata document.
+ *
+ * These are the indexer's, not this package's: a longer value is stored truncated on
+ * the read models every venue (Rally's included) lists coins from, so a document that
+ * exceeds one renders differently from the document you wrote. Rejecting is the honest
+ * outcome, since the URI cannot be edited afterwards.
+ */
+const METADATA_LIMITS = {
+  name: 128,
+  symbol: 32,
+  description: 2_000,
+  url: 512,
+  handle: 256,
+} as const;
+
+/**
+ * The whole inline document, capped the way an on-chain string should be. Matches the
+ * indexer's ceiling: past it a coin resolves to nothing at all, which is worse than a
+ * launch that fails here.
+ */
+const INLINE_MAX_BYTES = 256 * 1024;
+
+/** `data:` payload to text, in a browser or in Node. */
+function decodeInlinePayload(payload: string, base64: boolean): string {
+  if (!base64) return decodeURIComponent(payload);
+  if (typeof globalThis.atob === "function") {
+    const binary = globalThis.atob(payload);
+    // atob yields one char per BYTE, so a multibyte character (an em dash in a
+    // description, an emoji in a name) has to be decoded as UTF-8, not read off as
+    // code units.
+    return new TextDecoder().decode(Uint8Array.from(binary, (c) => c.charCodeAt(0)));
+  }
+  return Buffer.from(payload, "base64").toString("utf8");
+}
+
+function fail(message: string, details?: Record<string, unknown>): never {
+  throw new RallyError("METADATA_REQUIRED", message, details ? { details } : undefined);
+}
+
+/** A present-and-non-blank string field, or undefined. Anything non-string is an error. */
+function optionalField(doc: Record<string, unknown>, keys: string[], limit: number): string | undefined {
+  for (const key of keys) {
+    const value = doc[key];
+    if (value === undefined || value === null) continue;
+    if (typeof value !== "string") {
+      fail(`metadata \`${key}\` must be a string, got ${typeof value}.`);
+    }
+    // Blank is how "no website" is spelled by most launch UIs, so it means absent
+    // rather than invalid. The alias keys are only consulted while nothing has hit.
+    const trimmed = value.trim();
+    if (!trimmed) continue;
+    if (trimmed.length > limit) {
+      fail(
+        `metadata \`${key}\` is ${trimmed.length} characters; the limit is ${limit}. ` +
+          `Longer values are stored truncated, and the URI cannot be edited later.`,
+      );
+    }
+    return trimmed;
+  }
+  return undefined;
+}
+
+function requiredField(doc: Record<string, unknown>, keys: string[], limit: number): string {
+  const value = optionalField(doc, keys, limit);
+  if (!value) {
+    fail(
+      `metadata \`${keys[0]}\` is required and must be a non-empty string. A document ` +
+        `without it leaves the coin rendering as a bare address on every venue that ` +
+        `lists it, permanently.`,
+      { missing: keys[0] },
+    );
+  }
+  return value;
+}
+
+/**
+ * Validate a launch metadata document and return it normalized.
+ *
+ * This is the shape Rally pins and every venue reads: `name`, `symbol` and `imageUrl`
+ * required, `description`, `bannerUrl` and the socials optional. Extra keys are left
+ * alone (self-hosted documents carry their own venue's fields, and dropping them is
+ * not this function's business), blank optionals count as absent, and `image` /
+ * `banner` are accepted as aliases because that is the ERC-721 spelling most tooling
+ * writes.
+ *
+ * Every rule here is about what actually renders downstream, not taste:
+ *
+ *   - images accept `https://` and `ipfs://`, the two schemes a venue will hand to an
+ *     `<img>`. A `data:` image inside the document is dropped by the read models, so
+ *     it is refused rather than silently blanked.
+ *   - `website` must be absolute http(s). A bare `rally.fun` is not a link a venue can
+ *     render without guessing a scheme, so it is not stored as one.
+ *   - `twitter` / `telegram` take a bare handle (`gooddog`, `@gooddog`) or a full
+ *     http(s) URL, because creators enter both. Anything else carrying a `:` or `/` is
+ *     refused: venues normalize a handle by pasting it after `https://x.com/`, which
+ *     turns a stray scheme into a broken-but-clickable link.
+ */
+export function validateLaunchMetadataDocument(doc: unknown): LaunchMetadata {
+  if (typeof doc !== "object" || doc === null || Array.isArray(doc)) {
+    fail("Launch metadata must be a JSON object.");
+  }
+  const m = doc as Record<string, unknown>;
+
+  const media = (keys: [string, ...string[]], required: boolean): string | undefined => {
+    const value = required
+      ? requiredField(m, keys, METADATA_LIMITS.url)
+      : optionalField(m, keys, METADATA_LIMITS.url);
+    if (value && !/^(https:\/\/|ipfs:\/\/)/i.test(value)) {
+      fail(
+        `metadata \`${keys[0]}\` must be an https:// or ipfs:// URL, got "${value.slice(0, 60)}". ` +
+          `Upload the file first and reference it by URL.`,
+        { field: keys[0], value: value.slice(0, 200) },
+      );
+    }
+    return value;
+  };
+
+  const website = optionalField(m, ["website"], METADATA_LIMITS.url);
+  if (website && !/^https?:\/\//i.test(website)) {
+    fail(
+      `metadata \`website\` must be an absolute http(s) URL, got "${website.slice(0, 60)}".`,
+      { website: website.slice(0, 200) },
+    );
+  }
+
+  const social = (key: "twitter" | "telegram"): string | undefined => {
+    const value = optionalField(m, [key], METADATA_LIMITS.handle);
+    if (value && !/^https?:\/\//i.test(value) && /[:/]/.test(value)) {
+      fail(
+        `metadata \`${key}\` must be a bare handle or a full http(s) URL, got ` +
+          `"${value.slice(0, 60)}".`,
+        { [key]: value.slice(0, 200) },
+      );
+    }
+    return value;
+  };
+
+  const out: LaunchMetadata = {
+    name: requiredField(m, ["name"], METADATA_LIMITS.name),
+    symbol: requiredField(m, ["symbol"], METADATA_LIMITS.symbol),
+    imageUrl: media(["imageUrl", "image"], true)!,
+  };
+  const description = optionalField(m, ["description"], METADATA_LIMITS.description);
+  const bannerUrl = media(["bannerUrl", "banner"], false);
+  const twitter = social("twitter");
+  const telegram = social("telegram");
+  if (description) out.description = description;
+  if (bannerUrl) out.bannerUrl = bannerUrl;
+  if (website) out.website = website;
+  if (twitter) out.twitter = twitter;
+  if (telegram) out.telegram = telegram;
+  return out;
+}
+
+/**
+ * Check a self-hosted `metadataURI` before it is frozen onto the token forever.
+ *
+ * `launch()` takes an arbitrary string and the token stores it write-once, so a typo
+ * here is permanent: coins have shipped carrying `ipfs://rallypad`, which resolves to
+ * nothing and never will. Only three forms can actually be dereferenced by a consumer
+ * years from now, so only these three are accepted:
+ *
+ *   - `https://...`, a URL you keep alive. `http://` is refused, because every venue
+ *     rendering this coin is served over https and a mixed content logo is a dead logo.
+ *   - `ipfs://...`, content addressed, and the one form that outlives its host.
+ *   - `data:application/json,...`, the document inline, which cannot rot at all. It
+ *     costs calldata for the length of the JSON, so keep it to the display fields.
+ *
+ * The inline form is also the only one whose document is readable from here, so it is
+ * additionally checked against the metadata schema
+ * ({@link validateLaunchMetadataDocument}: `name`, `symbol` and `imageUrl` required,
+ * `description`, `bannerUrl` and the socials optional). An https or ipfs URI is checked
+ * for shape only, since nothing may be fetched during a launch.
+ *
+ * Note for hosts rendering Rally's own surfaces: those resolve a coin's display fields
+ * from Rally's pinning bucket or from an inline `data:` URI, and never dereference an
+ * arbitrary URL, since an indexer fetching creator supplied hosts is an SSRF rail. A
+ * launch self hosted on https is valid and renders in *your* venue from your own
+ * document; it just shows as a bare address on Rally's. Pass `metadata` instead to be
+ * listed there, or inline the JSON.
+ */
+export function validateMetadataURI(uri: string): string {
+  const trimmed = uri.trim();
+  if (!trimmed) {
+    throw new RallyError(
+      "METADATA_REQUIRED",
+      "`metadataURI` is empty. Pass the URI of JSON you host, or `metadata` to pin it.",
+    );
+  }
+  const inline = /^data:application\/json([^,]*),([\s\S]*)$/i.exec(trimmed);
+  const inlineJson = inline !== null;
+  if (!/^(https:\/\/|ipfs:\/\/)/i.test(trimmed) && !inlineJson) {
+    throw new RallyError(
+      "METADATA_REQUIRED",
+      `\`metadataURI\` must be https://, ipfs://, or an inline data:application/json ` +
+        `URI. Got "${trimmed.slice(0, 60)}". It is frozen onto the token at launch, so ` +
+        `anything else is permanently unresolvable.`,
+      { details: { metadataURI: trimmed.slice(0, 200) } },
+    );
+  }
+  if (inline) {
+    // The one form whose document is readable from here, so it is the one form checked
+    // against the schema rather than taken on faith. A pinned blob gets the same
+    // treatment from the pinning service; an https or ipfs URI is somebody else's host
+    // and is only ever checked by whoever fetches it.
+    if (trimmed.length > INLINE_MAX_BYTES) {
+      fail(
+        `An inline \`metadataURI\` is ${trimmed.length} bytes; the limit is ` +
+          `${INLINE_MAX_BYTES}. Past it the document is not read at all.`,
+      );
+    }
+    const [, params, payload] = inline;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(decodeInlinePayload(payload ?? "", /;base64$/i.test(params ?? "")));
+    } catch (cause) {
+      throw new RallyError(
+        "METADATA_REQUIRED",
+        "An inline `metadataURI` must carry a JSON document: " +
+          `\`data:application/json,\` + encodeURIComponent(JSON.stringify(metadata)), or ` +
+          "the same base64 encoded with a `;base64` parameter.",
+        { cause },
+      );
+    }
+    validateLaunchMetadataDocument(parsed);
+  } else {
+    // `ipfs://` or `https://` with nothing after it is a hand typed placeholder rather
+    // than a location: the exact mistake this function exists for.
+    const rest = trimmed.replace(/^[a-z]+:\/\//i, "").trim();
+    if (!rest) {
+      throw new RallyError(
+        "METADATA_REQUIRED",
+        `\`metadataURI\` is just a scheme ("${trimmed}"): it points at nothing.`,
+      );
+    }
+    // An ipfs path starts with a CID, and every CID encoding is long: 46 chars for a
+    // base58 v0 (`Qm...`), 59 for a base32 v1 (`bafy...`). This is a shape check, not a
+    // CID parse, and it exists because `ipfs://rallypad` and `ipfs://noodle` are both
+    // frozen onto real tokens today. Coins whose name happens to be their whole URI is
+    // not a case worth being lenient for.
+    const cid = rest.split(/[/?#]/, 1)[0] ?? "";
+    if (/^ipfs:\/\//i.test(trimmed) && !/^[A-Za-z0-9]{32,}$/.test(cid)) {
+      throw new RallyError(
+        "METADATA_REQUIRED",
+        `\`metadataURI\` "${trimmed}" is not an ipfs CID. Expected ipfs://<cid>[/path], ` +
+          `e.g. ipfs://bafy.../metadata.json.`,
+        { details: { metadataURI: trimmed.slice(0, 200) } },
+      );
+    }
+  }
+  return trimmed;
+}
+
+/**
  * The complete blob to pin, from what the caller supplied plus the launch's own
  * name and symbol.
  *
  * An explicit override wins, but only when it carries something: a blank `name` or
  * `symbol` would otherwise shadow the launch's own and pin a coin with no identity
  * on it. `imageUrl` is typed as required, but a JS caller can still omit it, so it
- * is checked rather than assumed.
+ * is checked rather than assumed, and the result goes through
+ * {@link validateLaunchMetadataDocument} like any other document.
  */
 function resolvePinMetadata(
   metadata: LaunchMetadataParams,
@@ -218,12 +478,15 @@ function resolvePinMetadata(
         "its public URL, or self-host the JSON and pass `metadataURI` instead.",
     );
   }
-  return {
+  // Through the same schema check as an inline document, so a launch fails the same way
+  // whoever is holding the JSON. Without it a `website: "gooddog.example"` pins fine and
+  // then renders as nothing, which is only discoverable after the coin exists.
+  return validateLaunchMetadataDocument({
     ...metadata,
     imageUrl: metadata.imageUrl.trim(),
     name: metadata.name?.trim() || name,
     symbol: metadata.symbol?.trim() || symbol,
-  };
+  });
 }
 
 /** Everything `prepareLaunch` needs that the client already knows. */
@@ -280,11 +543,14 @@ export async function prepareLaunch(
         "pin it through the configured service.",
     );
   }
-  // Resolved (and validated) before the salt grind: a missing logo should cost
-  // nothing, not surface as an opaque 400 from the pinning service after minutes
-  // of mining.
+  // Resolved (and validated) before the salt grind: a missing logo, or a URI that can
+  // never resolve, should cost nothing, not surface as an opaque 400 from the pinning
+  // service (or as a permanently nameless coin) after minutes of mining.
   const pinMetadata = params.metadata
     ? resolvePinMetadata(params.metadata, name, symbol)
+    : undefined;
+  const selfHostedURI = params.metadataURI
+    ? validateMetadataURI(params.metadataURI)
     : undefined;
 
   step("resolving");
@@ -363,7 +629,7 @@ export async function prepareLaunch(
     token = mined.address;
   }
 
-  let metadataURI = params.metadataURI;
+  let metadataURI = selfHostedURI;
   if (!metadataURI) {
     if (!ctx.pin) {
       throw new RallyError(
