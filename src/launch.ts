@@ -67,6 +67,17 @@ export interface LaunchParams {
    * and `symbol` default to this launch's own.
    */
   metadata?: LaunchMetadataParams;
+  /**
+   * Pin `metadata` with this instead of the client's configured pinner, for this launch
+   * only. The token address is mined before it is called, which is the whole reason a
+   * pin cannot simply happen first: Rally's pin path is keyed by the address.
+   *
+   * A host that already holds a session (its own SIWE JWT, its own storage) passes one
+   * here rather than making a throwaway `prepareLaunch` call to learn the address and a
+   * second to build the calldata. It also has nowhere else to put a "pinning now" tick,
+   * so `onStep` fires around it.
+   */
+  pin?: PinLaunchMetadata;
   /** A pre-mined salt. Must be creator-bound and hit the vanity pattern. */
   salt?: Hex;
   /**
@@ -489,6 +500,16 @@ function resolvePinMetadata(
   });
 }
 
+/**
+ * Pins a launch's metadata and returns the URI to freeze onto the token. `metadata`
+ * arrives fully resolved and validated, so an implementation only has to store it.
+ */
+export type PinLaunchMetadata = (input: {
+  chainId: number;
+  tokenAddress: Address;
+  metadata: LaunchMetadata;
+}) => Promise<string>;
+
 /** Everything `prepareLaunch` needs that the client already knows. */
 export interface PrepareLaunchContext {
   client: PublicClientLike;
@@ -499,13 +520,10 @@ export interface PrepareLaunchContext {
   /**
    * Pins metadata and returns the URI; absent when no pinner is configured.
    * `metadata` arrives fully resolved — `name`/`symbol` already defaulted from the
-   * launch — so a pinner never has to re-derive them.
+   * launch — so a pinner never has to re-derive them. `LaunchParams.pin` overrides
+   * this per launch.
    */
-  pin?: (input: {
-    chainId: number;
-    tokenAddress: Address;
-    metadata: LaunchMetadata;
-  }) => Promise<string>;
+  pin?: PinLaunchMetadata;
   resolveQuote: (quote: LaunchParams["quote"]) => Address;
 }
 
@@ -631,11 +649,12 @@ export async function prepareLaunch(
 
   let metadataURI = selfHostedURI;
   if (!metadataURI) {
-    if (!ctx.pin) {
+    const pin = params.pin ?? ctx.pin;
+    if (!pin) {
       throw new RallyError(
         "METADATA_REQUIRED",
         "No metadata service configured. Pass `metadata: { endpoint }` to createRallyClient, " +
-          "or supply your own `metadataURI`.",
+          "a `pin` callback on this launch, or supply your own `metadataURI`.",
       );
     }
     // Guaranteed by the check above — this branch means `metadataURI` was absent,
@@ -647,7 +666,7 @@ export async function prepareLaunch(
       );
     }
     step("pinning");
-    metadataURI = await ctx.pin({
+    metadataURI = await pin({
       chainId: addresses.chainId,
       tokenAddress: token,
       metadata: pinMetadata,

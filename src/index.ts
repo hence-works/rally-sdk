@@ -110,7 +110,7 @@ export {
   validateLaunchMetadataDocument,
   validateMetadataURI,
 } from "./launch";
-export type { LaunchParams, LaunchResult, PreparedLaunch } from "./launch";
+export type { LaunchParams, LaunchResult, PinLaunchMetadata, PreparedLaunch } from "./launch";
 
 // Trading
 export {
