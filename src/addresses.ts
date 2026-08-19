@@ -94,6 +94,11 @@ function usable(value: Address | undefined): value is Address {
  * Every generation ships its own `RallyParamRegistry` and `LaunchLib`. A legacy entry
  * written before the manifest carried them reads the current ones: the two were the same
  * contracts when such a manifest was written, so this is history, not a guess.
+ *
+ * `rallyVault`, `dividendDistributor` and `gachaVault` get no such fallback and pass
+ * through as recorded. They rotate with the generation and hold that generation's money,
+ * so the current ones are the WRONG contracts for a legacy coin, not stale copies of the
+ * right ones; undefined is the honest answer and a caller must skip rather than assume.
  */
 export function generationsOf(addresses: RallyAddresses): HookGeneration[] {
   const raw: Array<{
@@ -102,6 +107,9 @@ export function generationsOf(addresses: RallyAddresses): HookGeneration[] {
     rallyFactory?: Address;
     paramRegistry?: Address;
     launchLib?: Address;
+    rallyVault?: Address;
+    dividendDistributor?: Address;
+    gachaVault?: Address;
     deploymentBlock?: number;
   }> = [
     {
@@ -110,6 +118,9 @@ export function generationsOf(addresses: RallyAddresses): HookGeneration[] {
       rallyFactory: addresses.rallyFactory,
       paramRegistry: addresses.paramRegistry,
       launchLib: addresses.launchLib,
+      rallyVault: addresses.rallyVault,
+      dividendDistributor: addresses.dividendDistributor,
+      gachaVault: addresses.gachaVault,
       deploymentBlock: addresses.deploymentBlock,
     },
     ...(addresses.legacyDeployments ?? []),
@@ -123,6 +134,9 @@ export function generationsOf(addresses: RallyAddresses): HookGeneration[] {
       rallyFactory: usable(g.rallyFactory) ? g.rallyFactory : undefined,
       paramRegistry: usable(g.paramRegistry) ? g.paramRegistry : addresses.paramRegistry,
       launchLib: usable(g.launchLib) ? g.launchLib : addresses.launchLib,
+      rallyVault: usable(g.rallyVault) ? g.rallyVault : undefined,
+      dividendDistributor: usable(g.dividendDistributor) ? g.dividendDistributor : undefined,
+      gachaVault: usable(g.gachaVault) ? g.gachaVault : undefined,
       deploymentBlock: g.deploymentBlock ?? 0,
     });
   }

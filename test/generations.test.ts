@@ -53,6 +53,13 @@ const REGISTRY_V2: Address = "0x0B306BF915C4d645ff596e518fAf3F9669b97016";
 const LAUNCHLIB_V2: Address = "0x68B1D87F95878fE05B998F19b66F4baba5De1aed";
 const REGISTRY_V1: Address = "0x6666666666666666666666666666666666666666";
 const LAUNCHLIB_V1: Address = "0x7777777777777777777777777777777777777777";
+/** The money contracts, which rotate with the generation and are never substituted. */
+const VAULT_V2: Address = "0x8888888888888888888888888888888888888888";
+const DISTRIBUTOR_V2: Address = "0x9999999999999999999999999999999999999999";
+const GACHA_V2: Address = "0xaAaAaAaaAaAaAaaAaAAAAAAAAaaaAaAaAaaAaaAa";
+const VAULT_V1: Address = "0xbBbBBBBbbBBBbbbBbbBbbbbBBbBbbbbBbBbbBBbB";
+const DISTRIBUTOR_V1: Address = "0xCcCCccccCCCCcCCCCCCcCcCccCcCCCcCcccccccC";
+const GACHA_V1: Address = "0xDDdDddDdDdddDDddDDddDDDDdDdDDdDDdDDDDDDd";
 /** A hook this SDK version has never heard of. */
 const HOOK_UNKNOWN: Address = "0x4444444444444444444444444444444444444444";
 const ROUTER_UNKNOWN: Address = "0x5555555555555555555555555555555555555555";
@@ -88,6 +95,30 @@ const WITH_LEGACY_REGISTRY: RallyAddresses = {
       rallyRouter: ROUTER_V1,
       paramRegistry: REGISTRY_V1,
       launchLib: LAUNCHLIB_V1,
+      deploymentBlock: 10,
+    },
+  ],
+};
+
+/**
+ * A legacy entry carrying its own vault, distributor and gacha escrow: the shape a
+ * manifest written by the current Deploy.s.sol has.
+ */
+const WITH_LEGACY_MONEY: RallyAddresses = {
+  ...CURRENT_ONLY,
+  rallyVault: VAULT_V2,
+  dividendDistributor: DISTRIBUTOR_V2,
+  gachaVault: GACHA_V2,
+  legacyDeployments: [
+    {
+      launchHook: HOOK_V1,
+      rallyFactory: FACTORY_V1,
+      rallyRouter: ROUTER_V1,
+      paramRegistry: REGISTRY_V1,
+      launchLib: LAUNCHLIB_V1,
+      rallyVault: VAULT_V1,
+      dividendDistributor: DISTRIBUTOR_V1,
+      gachaVault: GACHA_V1,
       deploymentBlock: 10,
     },
   ],
@@ -238,6 +269,56 @@ describe("generationsOf", () => {
     ]);
     // An explicit empty list means the same thing as no list at all.
     expect(generationsOf({ ...CURRENT_ONLY, legacyDeployments: [] })).toEqual(gens);
+  });
+
+  it("keeps each generation's vault, distributor and gacha escrow with that generation", () => {
+    const gens = generationsOf(WITH_LEGACY_MONEY);
+    const current = gens[0]!;
+    const legacy = gens[1]!;
+    expect(current.rallyVault).toBe(VAULT_V2);
+    expect(current.dividendDistributor).toBe(DISTRIBUTOR_V2);
+    expect(current.gachaVault).toBe(GACHA_V2);
+    expect(legacy.rallyVault).toBe(VAULT_V1);
+    expect(legacy.dividendDistributor).toBe(DISTRIBUTOR_V1);
+    expect(legacy.gachaVault).toBe(GACHA_V1);
+  });
+
+  it("does NOT fall back to the current money contracts for an entry that omits them", () => {
+    // Unlike paramRegistry/launchLib, these hold the generation's own money: the current
+    // ones are different contracts, so substituting them would point a dividend claim at a
+    // distributor that never funded the epoch. Undefined is the only honest answer.
+    const legacy = generationsOf({
+      ...WITH_LEGACY_MONEY,
+      legacyDeployments: [
+        { launchHook: HOOK_V1, rallyFactory: FACTORY_V1, rallyRouter: ROUTER_V1, deploymentBlock: 10 },
+      ],
+    })[1]!;
+    expect(legacy.rallyVault).toBeUndefined();
+    expect(legacy.dividendDistributor).toBeUndefined();
+    expect(legacy.gachaVault).toBeUndefined();
+    // The registry and token deployer DO fall back, and must keep doing so.
+    expect(legacy.paramRegistry).toBe(REGISTRY_V2);
+    expect(legacy.launchLib).toBe(LAUNCHLIB_V2);
+  });
+
+  it("treats a zero money address as absent rather than a real contract", () => {
+    const legacy = generationsOf({
+      ...WITH_LEGACY_MONEY,
+      legacyDeployments: [
+        {
+          launchHook: HOOK_V1,
+          rallyFactory: FACTORY_V1,
+          rallyRouter: ROUTER_V1,
+          rallyVault: ZERO_ADDRESS,
+          dividendDistributor: ZERO_ADDRESS,
+          gachaVault: ZERO_ADDRESS,
+          deploymentBlock: 10,
+        },
+      ],
+    })[1]!;
+    expect(legacy.rallyVault).toBeUndefined();
+    expect(legacy.dividendDistributor).toBeUndefined();
+    expect(legacy.gachaVault).toBeUndefined();
   });
 
   it("returns the current generation first, then legacy newest first", () => {

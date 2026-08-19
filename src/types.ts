@@ -68,6 +68,19 @@ export interface LegacyDeployment {
    * optionality and fallback as `paramRegistry`.
    */
   launchLib?: Address;
+  /**
+   * That generation's platform revenue vault. `treasury` is immutable on its hook and
+   * factory, so this is where its fees land, permanently: a redeploy leaves it live and
+   * still accruing rather than migrating it.
+   */
+  rallyVault?: Address;
+  /**
+   * That generation's §6.1 dividend distributor. Set per hook, so a coin launched under
+   * this generation has its funded epochs recorded HERE and nowhere else.
+   */
+  dividendDistributor?: Address;
+  /** That generation's gacha prize escrow, built against its vault and router. */
+  gachaVault?: Address;
   /** Block that generation was deployed at, a `fromBlock` floor for scanning its logs. */
   deploymentBlock: number;
 }
@@ -86,6 +99,17 @@ export interface HookGeneration {
   paramRegistry: Address;
   /** The CREATE2 deployer of this generation's tokens. */
   launchLib: Address;
+  /**
+   * Where this generation's platform fees land, and where its dividend epochs and gacha
+   * rounds live. Unlike `paramRegistry` and `launchLib` these are NOT filled in from the
+   * current generation when a manifest does not record them: they rotate, so the current
+   * ones are different contracts holding different money, and substituting them would
+   * point a claim at a distributor that never funded the epoch. Undefined means "this SDK
+   * version's bundled manifest does not record it". Upgrade the SDK rather than guess.
+   */
+  rallyVault?: Address;
+  dividendDistributor?: Address;
+  gachaVault?: Address;
   deploymentBlock: number;
 }
 

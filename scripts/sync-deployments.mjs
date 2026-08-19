@@ -44,6 +44,11 @@ const field = (v) => (v === undefined ? "undefined" : JSON.stringify(v));
 // Each generation ships its own ParamRegistry and LaunchLib. Entries written before the
 // manifest carried them have neither, and the SDK falls back to the top-level ones at
 // runtime (`generationsOf`), so they are baked only when present rather than copied.
+//
+// RallyVault / DividendDistributor / GachaVault ride along for the same reason but with no
+// fallback: they rotate with the generation and hold that generation's money, so the
+// current ones are different contracts, not stale copies. Baked only when the manifest
+// records them; otherwise the SDK reports undefined and the caller skips.
 const legacy = (m) => {
   const list = Array.isArray(m.LegacyDeployments) ? m.LegacyDeployments : [];
   if (list.length === 0) return "";
@@ -56,6 +61,11 @@ const legacy = (m) => {
       ];
       if (g.ParamRegistry !== undefined) parts.push(`paramRegistry: ${field(g.ParamRegistry)}`);
       if (g.LaunchLib !== undefined) parts.push(`launchLib: ${field(g.LaunchLib)}`);
+      if (g.RallyVault !== undefined) parts.push(`rallyVault: ${field(g.RallyVault)}`);
+      if (g.DividendDistributor !== undefined) {
+        parts.push(`dividendDistributor: ${field(g.DividendDistributor)}`);
+      }
+      if (g.GachaVault !== undefined) parts.push(`gachaVault: ${field(g.GachaVault)}`);
       parts.push(`deploymentBlock: ${g.DeploymentBlock ?? 0}`);
       return `      {\n${parts.map((p) => `        ${p},`).join("\n")}\n      },`;
     })
