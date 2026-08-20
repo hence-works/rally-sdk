@@ -1,0 +1,72 @@
+{
+  "name": "@rally-fun/sdk",
+  "version": "0.1.0",
+  "description": "Launch and trade Rally coins from any app \u2014 headless TypeScript SDK for the Rally launchpad (Uniswap v4 bonding curve + graduation).",
+  "license": "MIT",
+  "author": "Rally",
+  "homepage": "https://www.rallypad.fun",
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": [
+    "rally",
+    "launchpad",
+    "memecoin",
+    "uniswap-v4",
+    "bonding-curve",
+    "evm",
+    "viem",
+    "defi"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hence-works/rally-sdk.git"
+  },
+  "bugs": {
+    "url": "https://github.com/hence-works/rally-sdk/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "sync:deployments": "node scripts/sync-deployments.mjs",
+    "prepublishOnly": "yarn check:deployments && yarn build && yarn test",
+    "check:deployments": "node scripts/sync-deployments.mjs --check"
+  },
+  "peerDependencies": {
+    "viem": "^2.21.0"
+  },
+  "devDependencies": {
+    "tsup": "^8.5.0",
+    "typescript": "^5.7.2",
+    "viem": "^2.21.0",
+    "vitest": "^2.1.9"
+  }
+}
