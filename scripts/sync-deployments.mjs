@@ -13,7 +13,11 @@
  * machine-specific. Pass `--include-local` for a dev build, or just hand the
  * addresses to `createRallyClient({ addresses })`.
  *
- *   node scripts/sync-deployments.mjs [--include-local]
+ * `--check` regenerates in memory and compares instead of writing, exiting non-zero when
+ * `src/deployments.ts` has drifted from the manifests. `prepublishOnly` runs it, so a
+ * publish carrying a stale address fails at pack time rather than reaching integrators.
+ *
+ *   node scripts/sync-deployments.mjs [--include-local] [--check]
  */
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -23,6 +27,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const manifestDir = resolve(here, "../../deployments");
 const out = resolve(here, "../src/deployments.ts");
 const includeLocal = process.argv.includes("--include-local");
+const checkOnly = process.argv.includes("--check");
 
 const files = readdirSync(manifestDir)
   .filter((f) => /^\d+\.json$/.test(f))
@@ -103,5 +108,19 @@ ${body}
 };
 `;
 
-writeFileSync(out, file);
-console.log(`Wrote ${out} for chains: ${entries.map(([c]) => c).join(", ")}`);
+const chains = entries.map(([c]) => c).join(", ");
+
+if (checkOnly) {
+  const current = readFileSync(out, "utf8");
+  if (current !== file) {
+    console.error(
+      `src/deployments.ts is stale: it does not match packages/deployments/*.json.\n` +
+        `Run \`yarn workspace @rally-fun/sdk sync:deployments\`, review the diff, and bump the version.`,
+    );
+    process.exit(1);
+  }
+  console.log(`src/deployments.ts is current for chains: ${chains}`);
+} else {
+  writeFileSync(out, file);
+  console.log(`Wrote ${out} for chains: ${chains}`);
+}

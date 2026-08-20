@@ -1,8 +1,10 @@
 {
   "name": "@rally-fun/sdk",
   "version": "0.1.0",
-  "description": "Launch and trade Rally coins from any app — headless TypeScript SDK for the Rally launchpad (Uniswap v4 bonding curve + graduation).",
+  "description": "Launch and trade Rally coins from any app \u2014 headless TypeScript SDK for the Rally launchpad (Uniswap v4 bonding curve + graduation).",
   "license": "MIT",
+  "author": "Rally",
+  "homepage": "https://www.rallypad.fun",
   "type": "module",
   "sideEffects": false,
   "main": "./dist/index.cjs",
@@ -40,8 +42,10 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/longshot-fun/cohort-apps.git",
-    "directory": "packages/sdk"
+    "url": "git+https://github.com/hence-works/rally-sdk.git"
+  },
+  "bugs": {
+    "url": "https://github.com/hence-works/rally-sdk/issues"
   },
   "publishConfig": {
     "access": "public"
@@ -53,7 +57,8 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "sync:deployments": "node scripts/sync-deployments.mjs",
-    "prepublishOnly": "yarn build && yarn test"
+    "prepublishOnly": "yarn check:deployments && yarn build && yarn test",
+    "check:deployments": "node scripts/sync-deployments.mjs --check"
   },
   "peerDependencies": {
     "viem": "^2.21.0"

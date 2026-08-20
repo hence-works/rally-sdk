@@ -56,7 +56,12 @@ yarn workspace @rally-fun/sdk sync:deployments   # re-bake addresses after a red
 
 ## Release checklist
 
-1. `sync:deployments` if any address moved.
+1. `sync:deployments` if any address moved. `prepublishOnly` runs
+   `check:deployments`, which fails the publish when `src/deployments.ts` has drifted
+   from `packages/deployments/*.json`, so a stale address cannot ship silently.
 2. `test` and `typecheck` green.
 3. Bump the version (any exported-name change is breaking).
-4. `build`, then publish. `files` ships `dist` and `README.md` only.
+4. `npm publish` from this directory. `prepublishOnly` re-runs the check, build and
+   tests. `files` ships `dist` and `README.md`; npm adds `LICENSE` and `package.json`.
+   Publish a first release of any version line under `--tag next`, smoke test the
+   tarball outside the monorepo, then promote with `npm dist-tag add`.

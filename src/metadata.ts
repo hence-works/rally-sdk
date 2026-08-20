@@ -24,7 +24,7 @@ import type { LaunchMetadata } from "./types";
 export type SignMessageFn = (message: string) => Promise<`0x${string}`>;
 
 export interface MetadataConfig {
-  /** The Rally GraphQL gateway, e.g. `https://api.rally.fun/graphql`. */
+  /** The Rally GraphQL gateway, e.g. `https://api.rallypad.fun/graphql`. */
   endpoint: string;
   /**
    * An existing bearer token. Supply one to skip the SIWE handshake entirely — useful

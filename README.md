@@ -1,6 +1,6 @@
 # @rally-fun/sdk
 
-Launch and trade [Rally](https://rally.fun) coins from your own app.
+Launch and trade [Rally](https://www.rallypad.fun) coins from your own app.
 
 Rally is a memecoin launchpad built as a Uniswap v4 hook: a virtual bonding curve that
 graduates atomically into a locked CLMM pool. This package is the headless client for
@@ -119,7 +119,7 @@ const rally = createRallyClient({
   chainId,
   publicClient,
   walletClient,
-  metadata: { endpoint: "https://api.rally.fun/graphql" },
+  metadata: { endpoint: "https://api.rallypad.fun/graphql" },
 });
 
 const imageUrl = await rally.uploadImage(file, file.type);
@@ -369,7 +369,7 @@ await rally.claimReferralFees(quote);       // pays your wallet; prepareClaimRef
 **It costs the trader nothing.** The referral comes out of the protocol's own revenue, not
 out of the fee the trader pays and not out of the creator's share, so a referred trade and
 an unreferred one price identically. There is nothing to disclose to your users and nothing
-that makes your venue worse to trade on than rally.fun.
+that makes your venue worse to trade on than rallypad.fun.
 
 There is no registration, no allowlist and no on-chain binding between a trader and a
 venue: the referrer is named per swap and you may name a different one on the next call.

@@ -304,7 +304,7 @@ function requiredField(doc: Record<string, unknown>, keys: string[], limit: numb
  *   - images accept `https://` and `ipfs://`, the two schemes a venue will hand to an
  *     `<img>`. A `data:` image inside the document is dropped by the read models, so
  *     it is refused rather than silently blanked.
- *   - `website` must be absolute http(s). A bare `rally.fun` is not a link a venue can
+ *   - `website` must be absolute http(s). A bare `rallypad.fun` is not a link a venue can
  *     render without guessing a scheme, so it is not stored as one.
  *   - `twitter` / `telegram` take a bare handle (`gooddog`, `@gooddog`) or a full
  *     http(s) URL, because creators enter both. Anything else carrying a `:` or `/` is
