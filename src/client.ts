@@ -18,6 +18,7 @@ import { RallyError } from "./errors";
 import {
   parseLaunchReceipt,
   prepareLaunch as prepareLaunchInner,
+  readMaxFirstBuy,
   readQuoteConfig,
   readTokenVanity,
   validateFeeSplit,
@@ -197,6 +198,14 @@ export function createRallyClient(config: RallyClientConfig) {
     getFeePolicy: (registry?: Address) => feePolicy(registry),
     /** A quote's allowlist entry, launch fee and graduation threshold. Cached. */
     getQuoteConfig: quoteConfig,
+    /**
+     * The largest fee-exempt creator first buy for a quote, in its base units (§4.1).
+     * Uncached: it moves with a governance change to `FIRST_BUY_SUPPLY_CAP_BPS` and with
+     * the quote's own threshold, and a caller reads it precisely when a creator is about
+     * to commit to a number.
+     */
+    getMaxFirstBuy: (quote: Address) =>
+      readMaxFirstBuy(publicClient, requireFactory(addresses), quote),
     /** The factory's current address-vanity pattern. */
     getTokenVanity: () => readTokenVanity(publicClient, requireFactory(addresses)),
 

@@ -48,6 +48,11 @@ export const rallyFactoryAbi = parseAbi([
   // before offering one as a launch option; do NOT treat presence here as permission.
   "function allQuotes() view returns (address[])",
   "function quoteCount() view returns (uint256)",
+  // Largest fee-exempt creator first buy for a quote, in that quote's base units. The
+  // bound itself is a share of total SUPPLY (`FIRST_BUY_SUPPLY_CAP_BPS`, 10% by default,
+  // governable under a permanent 20% ceiling); this converts it through the launch's own
+  // curve. `launch` reverts with `FirstBuyTooLarge` above it rather than clamping.
+  "function maxFirstBuy(address quote) view returns (uint256)",
   "function quoteList(uint256 index) view returns (address)",
   "event QuoteRegistered(address indexed quote)",
   "function hook() view returns (address)",

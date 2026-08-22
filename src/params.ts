@@ -56,6 +56,15 @@ export const REGISTRY_KEYS = {
    * existed, which simply means referrals are off there.
    */
   REFERRAL_FEE_BPS: 18,
+  /**
+   * Largest fee-exempt creator first buy, as bps of TOTAL SUPPLY (§4.1). Default 1000
+   * (10%), governable under a permanent 2000 ceiling the registry enforces itself. It is
+   * a share of supply rather than of `B` because that is the number a coin is judged by;
+   * `RallyFactory.maxFirstBuy(quote)` converts it into a quote amount per launch. Reads
+   * back 0 on a registry deployed before this key existed, and the factory paired with
+   * such a registry refuses every first buy rather than treating 0 as unbounded.
+   */
+  FIRST_BUY_SUPPLY_CAP_BPS: 19,
 } as const;
 
 export type RegistryKey = (typeof REGISTRY_KEYS)[keyof typeof REGISTRY_KEYS];

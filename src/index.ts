@@ -104,6 +104,7 @@ export type { RegistryKey } from "./params";
 export {
   parseLaunchReceipt,
   prepareLaunch,
+  readMaxFirstBuy,
   readQuoteConfig,
   readTokenVanity,
   validateFeeSplit,
