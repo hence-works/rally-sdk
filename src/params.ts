@@ -59,10 +59,12 @@ export const REGISTRY_KEYS = {
   /**
    * Largest fee-exempt creator first buy, as bps of TOTAL SUPPLY (§4.1). Default 1000
    * (10%), governable under a permanent 2000 ceiling the registry enforces itself. It is
-   * a share of supply rather than of `B` because that is the number a coin is judged by;
-   * `RallyFactory.maxFirstBuy(quote)` converts it into a quote amount per launch. Reads
-   * back 0 on a registry deployed before this key existed, and the factory paired with
-   * such a registry refuses every first buy rather than treating 0 as unbounded.
+   * a share of supply rather than of `B` because that is the number a coin is judged by.
+   *
+   * Listed because the ordinals must mirror the Solidity `Key` enum exactly, NOT because
+   * it can be read today: no deployed registry has this key, and the getter REVERTS (the
+   * ABI decoder rejects an out-of-range enum) rather than answering 0. Nothing on chain
+   * bounds a first buy yet, so a host that wants a limit applies its own.
    */
   FIRST_BUY_SUPPLY_CAP_BPS: 19,
 } as const;

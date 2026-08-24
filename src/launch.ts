@@ -114,12 +114,6 @@ export interface PreparedLaunch {
   /** The launch fee, in the quote's base units. */
   launchFee: bigint;
   initialBuy: bigint;
-  /**
-   * The largest first buy this launch could have made, in the quote's base units — the
-   * §4.1 cap {readMaxFirstBuy} was checked against. Surface it next to `initialBuy`
-   * wherever a creator is choosing one.
-   */
-  maxFirstBuy: bigint;
   /** `launchFee + initialBuy` — what the creator pays in total, excluding gas. */
   totalCost: bigint;
   fees?: FeeSplit;
@@ -143,31 +137,6 @@ export interface LaunchResult {
   receipt: TransactionReceipt;
   /** Tokens the creator received from `initialBuy`, if any. */
   firstBuyTokens?: bigint;
-}
-
-/**
- * The largest fee-exempt creator first buy for `quote`, in that quote's base units.
- *
- * The bound itself is governance's, and it is a share of TOTAL SUPPLY
- * (`FIRST_BUY_SUPPLY_CAP_BPS`, 10% by default, under a permanent 20% ceiling the registry
- * enforces on itself). The factory converts it through the launch's own curve, so read it
- * there rather than reproducing `x_v·f/(1−f)` and hoping the rounding agrees.
- *
- * `0` means no first buy is possible: either the quote has no threshold set, or the
- * factory's registry predates the key. Neither is a licence to send one anyway — `launch`
- * refuses anything above the limit rather than clamping to it.
- */
-export function readMaxFirstBuy(
-  client: PublicClientLike,
-  factory: Address,
-  quote: Address,
-): Promise<bigint> {
-  return readContract(client, {
-    address: factory,
-    abi: rallyFactoryAbi,
-    functionName: "maxFirstBuy",
-    args: [quote],
-  });
 }
 
 /** Read a quote's allowlist entry and per-quote economics. */
@@ -604,12 +573,7 @@ export async function prepareLaunch(
 
   step("resolving");
   const quoteAddress = ctx.resolveQuote(params.quote);
-  // The first-buy bound comes back with the quote economics it belongs to, so the result
-  // can report what the creator's buy was measured against whether or not they made one.
-  const [quote, maxFirstBuy] = await Promise.all([
-    readQuoteConfig(client, factory, quoteAddress, addresses.weth),
-    readMaxFirstBuy(client, factory, quoteAddress),
-  ]);
+  const quote = await readQuoteConfig(client, factory, quoteAddress, addresses.weth);
   if (!quote.allowed) {
     throw new RallyError(
       "QUOTE_NOT_ALLOWED",
@@ -624,18 +588,16 @@ export async function prepareLaunch(
   if (initialBuy < 0n) {
     throw new RallyError("INVALID_AMOUNT", "initialBuy cannot be negative.");
   }
-  // The §4.1 first-buy bound, checked before the salt grind rather than left to revert as
-  // `FirstBuyTooLarge` after minutes of mining. The limit is a governed share of total
-  // supply, converted into this quote's units by the factory itself, so an integrator
-  // never has to reproduce the curve math to size a creator buy.
-  if (initialBuy > maxFirstBuy) {
-    throw new RallyError(
-      "INVALID_AMOUNT",
-      `initialBuy ${initialBuy} exceeds the first-buy cap of ${maxFirstBuy} for this ` +
-        `quote. The rest can be bought on the curve after the launch, at the ordinary fee.`,
-      { details: { quote: quote.address, initialBuy, limit: maxFirstBuy } },
-    );
-  }
+  // NO FIRST-BUY BOUND IS CHECKED HERE. The §4.1 cap (`FIRST_BUY_SUPPLY_CAP_BPS`, read
+  // through `RallyFactory.maxFirstBuy`) is not on any deployed factory yet: the live
+  // Robinhood factory predates it and answers a bare `execution reverted`, so a preflight
+  // read here failed every launch it was supposed to protect. Until a factory that has
+  // the view is deployed, `initialBuy` is bounded only by `B`, the way it has always been
+  // on chain, and a host that wants a smaller advisory bound applies its own.
+  //
+  // When that factory ships: restore the read, check `initialBuy` against it BEFORE the
+  // salt grind (so an over-cap buy costs no mining time), and report the limit on
+  // `PreparedLaunch` so a creator can see what they were measured against.
   const totalCost = quote.launchFee + initialBuy;
   const fundWith = params.fundWith ?? (quote.isNative ? "native" : "erc20");
   if (fundWith === "native" && !quote.isNative) {
@@ -767,7 +729,6 @@ export async function prepareLaunch(
     quote,
     launchFee: quote.launchFee,
     initialBuy,
-    maxFirstBuy,
     totalCost,
     fees: params.fees,
     fundWith,
