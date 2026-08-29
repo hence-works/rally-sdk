@@ -265,6 +265,10 @@ describe("generationsOf", () => {
         paramRegistry: REGISTRY_V2,
         launchLib: LAUNCHLIB_V2,
         deploymentBlock: 100,
+        // A redeploy of the v1 protocol. The `_V2` fixture names here mean the second
+        // GENERATION, which is a different axis from `protocolVersion` (the launch layer
+        // the hook implements) and predates it.
+        protocolVersion: 1,
       },
     ]);
     // An explicit empty list means the same thing as no list at all.

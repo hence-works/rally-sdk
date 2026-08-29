@@ -107,11 +107,19 @@ export function generationsOf(addresses: RallyAddresses): HookGeneration[] {
     rallyFactory?: Address;
     paramRegistry?: Address;
     launchLib?: Address;
+    curveShapes?: Address;
     rallyVault?: Address;
     dividendDistributor?: Address;
     gachaVault?: Address;
     deploymentBlock?: number;
+    protocolVersion?: 1 | 2;
   }> = [
+    // PROTOCOL v2 generations lead: they are the newest, and a launch targeting v2 wants
+    // the first v2 entry. They are NOT a successor to the v1 entries below — both
+    // protocols are current, and a v1 coin keeps trading on its own hook forever — so the
+    // only ordered read of this list is "newest first within a protocol". Everything else
+    // matches by address.
+    ...(addresses.v2Deployments ?? []).map((g) => ({ ...g, protocolVersion: 2 as const })),
     {
       launchHook: addresses.launchHook,
       rallyRouter: addresses.rallyRouter,
@@ -128,12 +136,26 @@ export function generationsOf(addresses: RallyAddresses): HookGeneration[] {
   const out: HookGeneration[] = [];
   for (const g of raw) {
     if (!usable(g.launchHook) || !usable(g.rallyRouter)) continue;
+    const version = g.protocolVersion ?? 1;
     out.push({
       launchHook: g.launchHook,
       rallyRouter: g.rallyRouter,
+      protocolVersion: version,
+      curveShapes: usable(g.curveShapes) ? g.curveShapes : undefined,
       rallyFactory: usable(g.rallyFactory) ? g.rallyFactory : undefined,
-      paramRegistry: usable(g.paramRegistry) ? g.paramRegistry : addresses.paramRegistry,
-      launchLib: usable(g.launchLib) ? g.launchLib : addresses.launchLib,
+      // A v1 entry missing its registry or deployer reads the CURRENT v1 ones: the two
+      // were the same contracts when such a manifest was written, so that is history. A
+      // v2 entry gets no such fallback — the top-level addresses describe a v1
+      // deployment, and handing a v2 coin a v1 registry would answer with another
+      // deployment's parameters rather than fail.
+      paramRegistry:
+        usable(g.paramRegistry) || version === 2
+          ? (g.paramRegistry as Address)
+          : addresses.paramRegistry,
+      launchLib:
+        usable(g.launchLib) || version === 2
+          ? (g.launchLib as Address)
+          : addresses.launchLib,
       rallyVault: usable(g.rallyVault) ? g.rallyVault : undefined,
       dividendDistributor: usable(g.dividendDistributor) ? g.dividendDistributor : undefined,
       gachaVault: usable(g.gachaVault) ? g.gachaVault : undefined,
@@ -141,6 +163,20 @@ export function generationsOf(addresses: RallyAddresses): HookGeneration[] {
     });
   }
   return out;
+}
+
+/**
+ * The newest generation running `protocolVersion`, or undefined when the chain has none.
+ *
+ * This is what a LAUNCH resolves against, because launching is the one operation that
+ * chooses a generation rather than inheriting one. Every other path resolves the
+ * generation from the coin (`generationForHook`), since a coin's hook is permanent.
+ */
+export function currentGeneration(
+  addresses: RallyAddresses,
+  protocolVersion: 1 | 2,
+): HookGeneration | undefined {
+  return generationsOf(addresses).find((g) => g.protocolVersion === protocolVersion);
 }
 
 /** The generation whose hook is `hook` (case-insensitive), or undefined if unknown. */

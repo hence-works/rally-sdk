@@ -78,6 +78,38 @@ const legacy = (m) => {
   return `\n    legacyDeployments: [\n${rows}\n    ],`;
 };
 
+// `V2Deployments`: every PROTOCOL v2 generation on the chain, newest first. Kept apart
+// from `legacyDeployments` because v2 is a second launch layer rather than a retired
+// version of this one: both are current, they run side by side forever, and they price a
+// curve trade differently.
+//
+// Unlike a legacy entry, nothing here falls back to a top-level address. Those describe a
+// v1 deployment, so reading a v2 coin's params off the top-level registry would answer
+// with a different deployment's values instead of failing.
+const v2 = (m) => {
+  const list = Array.isArray(m.V2Deployments) ? m.V2Deployments : [];
+  if (list.length === 0) return "";
+  const rows = list
+    .map((g) => {
+      const parts = [
+        `launchHook: ${field(g.LaunchHook)}`,
+        `rallyFactory: ${field(g.RallyFactory)}`,
+        `rallyRouter: ${field(g.RallyRouter)}`,
+        `paramRegistry: ${field(g.ParamRegistry)}`,
+        `launchLib: ${field(g.LaunchLib)}`,
+      ];
+      if (g.CurveShapes !== undefined) parts.push(`curveShapes: ${field(g.CurveShapes)}`);
+      if (g.RallyVault !== undefined) parts.push(`rallyVault: ${field(g.RallyVault)}`);
+      if (g.DividendDistributor !== undefined) {
+        parts.push(`dividendDistributor: ${field(g.DividendDistributor)}`);
+      }
+      parts.push(`deploymentBlock: ${g.DeploymentBlock ?? 0}`);
+      return `      {\n${parts.map((p) => `        ${p},`).join("\n")}\n      },`;
+    })
+    .join("\n");
+  return `\n    v2Deployments: [\n${rows}\n    ],`;
+};
+
 const body = entries
   .map(
     ([chainId, m]) => `  ${chainId}: {
@@ -93,7 +125,7 @@ const body = entries
     rallyRouter: ${field(m.RallyRouter)},
     dividendDistributor: ${field(m.DividendDistributor)},
     rallyVault: ${field(m.RallyVault)},
-    gachaVault: ${field(m.GachaVault)},${legacy(m)}
+    gachaVault: ${field(m.GachaVault)},${legacy(m)}${v2(m)}
   },`,
   )
   .join("\n");

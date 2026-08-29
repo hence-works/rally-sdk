@@ -76,6 +76,9 @@ function launchState(over: Partial<LaunchState> = {}): LaunchState {
   const poolKey = poolKeyFor(WETH, TOKEN, HOOK);
   return {
     token: TOKEN,
+    // These fixtures are all v1: a virtual curve, `poolPriceWad` pinned at `P(B)`.
+    // v2 quoting has its own suite (clmm.test.ts), because it shares no math with this.
+    protocolVersion: 1,
     pid: poolIdFor(poolKey),
     quote: {
       address: WETH,

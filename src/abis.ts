@@ -170,8 +170,78 @@ export const erc20Abi = parseAbi([
  * cannot place it itself — v4 skips a hook's own `beforeSwap` on a self-call — which is why
  * there is no bespoke launch event to read instead.)
  */
+/**
+ * RallyFactoryV2 — the PROTOCOL v2 creation path.
+ *
+ * Two differences an integrator will hit. `launch` gained a `curvePreset` overload (v2
+ * launches pick a curve SHAPE, §4.2), and none of the four forms is `payable`: v2 is
+ * wETH-only, so a launch never carries native value. The mining helpers, the quote
+ * allowlist and the vanity predicate are unchanged, and `quotes(address)` is
+ * byte-identical to v1's, so a caller reading launch terms needs no branch.
+ */
+export const rallyFactoryV2Abi = parseAbi([
+  "function launch(string name, string symbol, string metadataURI, bytes32 salt, address quote, uint256 initialBuy, (uint16 creatorBps, uint16 dividendBps, uint16 buybackBps, uint16 lpSupportBps) feeConfig, uint8 curvePreset) returns (bytes32 pid, address token)",
+  "function launch(string name, string symbol, string metadataURI, bytes32 salt, address quote, uint256 initialBuy, (uint16 creatorBps, uint16 dividendBps, uint16 buybackBps, uint16 lpSupportBps) feeConfig) returns (bytes32 pid, address token)",
+  "function launch(string name, string symbol, string metadataURI, bytes32 salt, address quote, uint256 initialBuy) returns (bytes32 pid, address token)",
+  "function predictToken(bytes32 salt, string name, string symbol) view returns (address)",
+  "function packSalt(address creator, uint96 nonce) pure returns (bytes32)",
+  "function saltCreator(bytes32 salt) pure returns (address)",
+  "function tokenInitCodeHash(string name, string symbol) view returns (bytes32)",
+  "function launchLib() view returns (address)",
+  "function tokenVanity() view returns (uint8 prefixLen, uint8 suffixLen, uint64 prefixBits, uint64 suffixBits)",
+  "function matchesVanity(address a) view returns (bool)",
+  "function quotes(address quote) view returns (bool allowed, uint8 decimals, uint256 gradThreshold, uint256 launchFee, uint256 scale)",
+  "function allQuotes() view returns (address[])",
+  "function quoteCount() view returns (uint256)",
+  "function quoteList(uint256 index) view returns (address)",
+  "function hook() view returns (address)",
+  "function registry() view returns (address)",
+  "function defaultFeeConfig() view returns (uint16 creatorBps, uint16 dividendBps, uint16 buybackBps, uint16 lpSupportBps)",
+  "event QuoteRegistered(address indexed quote)",
+  // No `sqrtPriceX96`/`tick`: a v2 first buy fills against REAL liquidity, so the core
+  // v4 `Swap` in the same transaction carries both.
+  "event FirstBuy(bytes32 indexed pid, address indexed creator, int128 amount0, int128 amount1)",
+]);
+
+/**
+ * RallyHookV2 — the PROTOCOL v2 per-pool reads.
+ *
+ * Deliberately NOT a superset of `rallyHookAbi`. Three v1 reads are gone and one is
+ * renamed, and the reasons are the same reason v2 exists:
+ *
+ *   - `poolPriceWad` and `poolReserves` do not exist. A v2 pool holds real liquidity from
+ *     block one, so its price and its reserves are ordinary v4 pool state — read them off
+ *     the PoolManager (`readSlot0`), not off the hook. Not porting them is a size
+ *     decision, not an oversight: the hook has ~1.3 KB of EIP-170 headroom left.
+ *   - `bonded(pid)` became `bondedOf(pid)`, and it is DERIVED rather than accumulated:
+ *     the quote the launch's position ladder holds at the current price. Same number,
+ *     computed instead of stored, which is why v2 emits `Bonded` only once.
+ *   - `launchedAt`/`graduatedAt` fold into `launchOf`, one call instead of two.
+ */
+export const rallyHookV2Abi = parseAbi([
+  "function phaseOf(bytes32 pid) view returns (uint8)",
+  "function bondedOf(bytes32 pid) view returns (uint256)",
+  "function gradThreshold(bytes32 pid) view returns (uint256)",
+  "function curveFeeBps(bytes32 pid) view returns (uint256)",
+  "function launchOf(bytes32 pid) view returns (address token, address creator, address quote, uint40 launchedAt, uint40 graduatedAt)",
+  "function feeConfigOf(bytes32 pid) view returns ((uint16 creatorBps, uint16 dividendBps, uint16 buybackBps, uint16 lpSupportBps))",
+  "function curvePresetOf(bytes32 pid) view returns (uint8)",
+  "function curveSupplyOf(bytes32 pid) view returns (uint256)",
+  // The tick graduation latches at. A v2 coin's progress is a PRICE question, so this is
+  // what "how far to breakout" measures against alongside the ladder.
+  "function gradTickOf(bytes32 pid) view returns (int24)",
+  "function positionsOf(bytes32 pid) view returns ((int24 tickLower, int24 tickUpper, uint128 liquidity, bytes32 salt)[])",
+  "function creatorFees(bytes32 pid) view returns (uint256)",
+  "function referralPendingOf(bytes32 pid) view returns (uint256)",
+  "function claimCreatorFees(bytes32 pid) returns (uint256)",
+]);
+
 export const poolManagerAbi = parseAbi([
   "event Swap(bytes32 indexed id, address indexed sender, int128 amount0, int128 amount1, uint160 sqrtPriceX96, uint128 liquidity, int24 tick, uint24 fee)",
+  // v4 exposes pool state through raw storage reads rather than getters; `StateLibrary`
+  // is the slot arithmetic, done here in `poolStateSlot`. One call answers price, tick
+  // and both fee fields for a pool, which is all a v2 quote needs.
+  "function extsload(bytes32 slot) view returns (bytes32)",
 ]);
 
 export const uniswapV3PoolAbi = parseAbi([

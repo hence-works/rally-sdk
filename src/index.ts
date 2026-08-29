@@ -27,6 +27,7 @@ export {
   ETH_ROUTES,
   ZERO_ADDRESS,
   defaultEthRoute,
+  currentGeneration,
   generationForHook,
   generationsOf,
   getBundledAddresses,
@@ -40,8 +41,10 @@ export { DEPLOYMENTS } from "./deployments";
 export {
   erc20Abi,
   rallyFactoryAbi,
+  rallyFactoryV2Abi,
   poolManagerAbi,
   rallyHookAbi,
+  rallyHookV2Abi,
   rallyParamRegistryAbi,
   rallyRouterAbi,
   rallyTokenAbi,
@@ -49,8 +52,36 @@ export {
 } from "./abis";
 
 // Pool identity
-export { V4, poolIdFor, poolIdOf, poolKeyFor, sortCurrencies } from "./pool";
-export type { PoolKey } from "./pool";
+export {
+  V4,
+  decodeSlot0,
+  poolIdFor,
+  poolIdOf,
+  poolKeyFor,
+  poolStateSlot,
+  priceWadFromSqrtPrice,
+  sortCurrencies,
+} from "./pool";
+export type { PoolKey, Slot0 } from "./pool";
+
+// Protocol v2 curve math. A v2 launch's curve IS Uniswap v4 liquidity, so it is priced by
+// walking its position ladder rather than by the constant-product math in `./curve` —
+// which applies to v1 and only to v1. `quoteTrade` picks the right one off
+// `LaunchState.protocolVersion`; these are exported for hosts that want the pieces.
+export {
+  amount0Delta,
+  amount1Delta,
+  ladderAmount,
+  liquidityAt,
+  simulateSwap,
+  sqrtPriceAtTick,
+  tickMapOf,
+  MAX_SQRT_PRICE,
+  MAX_TICK,
+  MIN_SQRT_PRICE,
+  MIN_TICK,
+} from "./clmm";
+export type { LadderPosition, SwapResult } from "./clmm";
 
 // Salts & vanity mining
 export {
@@ -166,6 +197,7 @@ export type {
   LaunchState,
   LaunchStep,
   LegacyDeployment,
+  V2Deployment,
   Phase,
   PublicClientLike,
   QuoteConfig,

@@ -19,7 +19,8 @@ import {
   type TransactionReceipt,
 } from "viem";
 import { readContract } from "viem/actions";
-import { erc20Abi, rallyFactoryAbi, rallyHookAbi } from "./abis";
+import { erc20Abi, rallyFactoryAbi, rallyFactoryV2Abi, rallyHookAbi } from "./abis";
+import { currentGeneration } from "./addresses";
 import { RallyError } from "./errors";
 import { mineVanitySalt } from "./mine";
 import { poolIdOf } from "./pool";
@@ -39,6 +40,31 @@ import type {
 export interface LaunchParams {
   name: string;
   symbol: string;
+  /**
+   * Which launch layer to open the coin on. Defaults to 1.
+   *
+   * Both are live at once and neither supersedes the other — a v4 hook is part of the
+   * PoolKey, so this choice is permanent for the coin. The difference a creator sees:
+   *
+   *   - **v1** runs a virtual constant-product curve. The pool holds no liquidity until
+   *     graduation, so third parties price the coin at $0 and aggregators will not route
+   *     it until it graduates.
+   *   - **v2** mints the curve as real v4 liquidity. The pool quotes, routes and indexes
+   *     from block one, and graduation is a latch rather than a migration. It also lets a
+   *     launch pick a curve SHAPE (`curvePreset`).
+   *
+   * Throws `MISSING_ADDRESS` when the chain has no deployment for the version asked for.
+   */
+  protocolVersion?: 1 | 2;
+  /**
+   * v2 only: the curve SHAPE, by preset id from `RallyCurveShapes` (§4.2). Preset 0 is
+   * the flat curve, which reproduces v1's price schedule exactly; the others front- or
+   * back-load the allocation. Omit for flat.
+   *
+   * Passing this on a v1 launch throws: v1 has one curve shape and silently ignoring the
+   * argument would hand a creator a coin they did not ask for.
+   */
+  curvePreset?: number;
   /**
    * Quote asset: an allowlisted address, or `"WETH"` / `"USDC"` for the chain's
    * canonical ones. Each quote carries its own launch fee and graduation threshold.
@@ -161,6 +187,25 @@ export async function readQuoteConfig(
     scale,
     isNative: quote.toLowerCase() === weth.toLowerCase(),
   };
+}
+
+/**
+ * The v2 factory's default fee split, for the one call that needs it spelled out.
+ *
+ * Deliberately not the registry's `DEFAULT_*_BPS`: those are shared with v1 and seed
+ * creator-only, and v2's factory carries its own buyback-weighted default instead.
+ * Substituting the registry's would quietly reroute a creator's fees.
+ */
+async function readV2DefaultFees(
+  client: PublicClientLike,
+  factory: Address,
+): Promise<FeeSplit> {
+  const [creatorBps, dividendBps, buybackBps, lpSupportBps] = await readContract(client, {
+    address: factory,
+    abi: rallyFactoryV2Abi,
+    functionName: "defaultFeeConfig",
+  });
+  return { creatorBps, dividendBps, buybackBps, lpSupportBps };
 }
 
 /** Read the factory's current vanity pattern. */
@@ -514,6 +559,12 @@ export type PinLaunchMetadata = (input: {
 export interface PrepareLaunchContext {
   client: PublicClientLike;
   addresses: RallyAddresses;
+  /**
+   * The v1 factory. Kept as-is so a host that pins its own address keeps working; a v2
+   * launch resolves its factory from the address set's `v2Deployments` instead, since the
+   * two are different contracts with different `launch` overloads and one cannot stand in
+   * for the other.
+   */
   factory: Address;
   account?: Address;
   feePolicy: () => Promise<FeePolicy>;
@@ -531,8 +582,33 @@ export async function prepareLaunch(
   ctx: PrepareLaunchContext,
   params: LaunchParams,
 ): Promise<PreparedLaunch> {
-  const { client, addresses, factory } = ctx;
+  const { client, addresses } = ctx;
   const step = params.onStep ?? (() => {});
+
+  // Which launch layer, and therefore which factory, hook and ABI. Resolved first: almost
+  // everything below is addressed off the generation rather than off the chain.
+  const protocolVersion = params.protocolVersion ?? 1;
+  const generation = protocolVersion === 2 ? currentGeneration(addresses, 2) : undefined;
+  if (protocolVersion === 2 && !generation?.rallyFactory) {
+    throw new RallyError(
+      "MISSING_ADDRESS",
+      `Chain ${addresses.chainId} has no protocol v2 deployment, so a v2 launch cannot be ` +
+        `built. Launch on v1, or pass \`addresses.v2Deployments\` to createRallyClient for ` +
+        `a deployment this SDK version does not bundle.`,
+      { details: { chainId: addresses.chainId } },
+    );
+  }
+  if (params.curvePreset !== undefined && protocolVersion !== 2) {
+    throw new RallyError(
+      "INVALID_AMOUNT",
+      "`curvePreset` is a protocol v2 option: v1 has a single curve shape. Pass " +
+        "`protocolVersion: 2` to choose one.",
+      { details: { curvePreset: params.curvePreset } },
+    );
+  }
+  const factory = protocolVersion === 2 ? generation!.rallyFactory! : ctx.factory;
+  const factoryAbi = protocolVersion === 2 ? rallyFactoryV2Abi : rallyFactoryAbi;
+  const launchHook = protocolVersion === 2 ? generation!.launchHook : addresses.launchHook;
 
   const name = params.name.trim();
   const symbol = params.symbol.trim().toUpperCase();
@@ -599,7 +675,19 @@ export async function prepareLaunch(
   // salt grind (so an over-cap buy costs no mining time), and report the limit on
   // `PreparedLaunch` so a creator can see what they were measured against.
   const totalCost = quote.launchFee + initialBuy;
-  const fundWith = params.fundWith ?? (quote.isNative ? "native" : "erc20");
+  // v2 is wETH-only and none of its `launch` overloads is payable, so a launch never
+  // carries native value there: the creator holds wETH and approves it. Defaulting a v2
+  // launch to "native" the way v1 does would build a transaction that reverts on send.
+  const fundWith =
+    params.fundWith ?? (quote.isNative && protocolVersion === 1 ? "native" : "erc20");
+  if (fundWith === "native" && protocolVersion === 2) {
+    throw new RallyError(
+      "INVALID_AMOUNT",
+      "Protocol v2 launches cannot be funded with native ETH: `RallyFactoryV2.launch` is " +
+        "not payable. Wrap to wETH and use `fundWith: \"erc20\"`.",
+      { details: { chainId: addresses.chainId } },
+    );
+  }
   if (fundWith === "native" && !quote.isNative) {
     throw new RallyError(
       "INVALID_AMOUNT",
@@ -615,14 +703,14 @@ export async function prepareLaunch(
     readTokenVanity(client, factory),
     readContract(client, {
       address: factory,
-      abi: rallyFactoryAbi,
+      abi: factoryAbi,
       functionName: "tokenInitCodeHash",
       args: [name, symbol],
     }),
     // LaunchLib runs the `new RallyToken{salt}`, so it — not the factory — is the
     // CREATE2 `from`. Mining against the factory lands a non-vanity address and
     // reverts VanityMismatch. Read it rather than trusting the bundled manifest.
-    readContract(client, { address: factory, abi: rallyFactoryAbi, functionName: "launchLib" }),
+    readContract(client, { address: factory, abi: factoryAbi, functionName: "launchLib" }),
   ]);
 
   let salt: Hex;
@@ -640,7 +728,7 @@ export async function prepareLaunch(
     }
     token = await readContract(client, {
       address: factory,
-      abi: rallyFactoryAbi,
+      abi: factoryAbi,
       functionName: "predictToken",
       args: [salt, name, symbol],
     });
@@ -706,23 +794,43 @@ export async function prepareLaunch(
     }
   }
 
-  // The 6-arg overload defers to the governance DEFAULT_*_BPS on-chain, so omitting a
-  // split gets the real default rather than one guessed off stale reads.
-  const data = params.fees
-    ? encodeFunctionData({
-        abi: rallyFactoryAbi,
-        functionName: "launch",
-        args: [name, symbol, metadataURI, salt, quote.address, initialBuy, params.fees],
-      })
-    : encodeFunctionData({
-        abi: rallyFactoryAbi,
-        functionName: "launch",
-        args: [name, symbol, metadataURI, salt, quote.address, initialBuy],
-      });
+  // The shortest overload that says what the caller meant. Omitting a split defers to the
+  // factory's own default on-chain rather than a value guessed off a stale read, and
+  // omitting a preset defers to flat the same way.
+  const base = [name, symbol, metadataURI, salt, quote.address, initialBuy] as const;
+  const data =
+    protocolVersion === 2 && params.curvePreset !== undefined
+      ? encodeFunctionData({
+          abi: rallyFactoryV2Abi,
+          functionName: "launch",
+          args: [
+            ...base,
+            // There is no (base + preset) overload without a split, so choosing a shape
+            // means naming one. Read the factory's own default rather than substituting a
+            // guess: it is not the registry's `DEFAULT_*_BPS` (those are v1's and seed
+            // creator-only), it is v2's buyback-weighted default, and a creator who did
+            // not ask to change their split must not have it changed by picking a curve.
+            params.fees ?? (await readV2DefaultFees(client, factory)),
+            params.curvePreset,
+          ],
+        })
+      : params.fees
+        ? encodeFunctionData({
+            abi: factoryAbi,
+            functionName: "launch",
+            args: [...base, params.fees],
+          })
+        : encodeFunctionData({
+            abi: factoryAbi,
+            functionName: "launch",
+            args: [...base],
+          });
 
   return {
     token,
-    pid: poolIdOf(quote.address, token, addresses.launchHook),
+    // The coin's own hook, which for v2 is its generation's, not the chain's v1 one. A
+    // PoolId derived against the wrong hook addresses a pool that does not exist.
+    pid: poolIdOf(quote.address, token, launchHook),
     salt,
     creator,
     metadataURI,
@@ -778,13 +886,21 @@ export function parseLaunchReceipt(
   for (const log of receipt.logs) {
     const from = log.address.toLowerCase();
     if (factory !== undefined && from === factory.toLowerCase()) {
-      try {
-        const d = decodeEventLog({ abi: rallyFactoryAbi, data: log.data, topics: log.topics });
-        if (d.eventName === "FirstBuy") {
-          firstBuys.push({ pid: d.args.pid, amount0: d.args.amount0, amount1: d.args.amount1 });
+      // Both factory ABIs are tried, because the two `FirstBuy` events differ: v2's
+      // dropped the `sqrtPriceX96`/`tick` pair (its first buy fills against real
+      // liquidity, so the core v4 `Swap` in the same transaction carries both), which
+      // gives it a different topic0. Decoding with only v1's would silently leave
+      // `firstBuyTokens` undefined on every v2 launch that bought in.
+      for (const abi of [rallyFactoryAbi, rallyFactoryV2Abi]) {
+        try {
+          const d = decodeEventLog({ abi, data: log.data, topics: log.topics });
+          if (d.eventName === "FirstBuy") {
+            firstBuys.push({ pid: d.args.pid, amount0: d.args.amount0, amount1: d.args.amount1 });
+            break;
+          }
+        } catch {
+          // not this ABI's event; try the other, then give up
         }
-      } catch {
-        // an unrelated factory event
       }
       continue;
     }

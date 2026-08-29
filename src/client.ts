@@ -13,7 +13,12 @@
  */
 import { type Address, type Hex, type TransactionReceipt } from "viem";
 import { sendTransaction, waitForTransactionReceipt } from "viem/actions";
-import { defaultEthRoute, requireFactory, resolveAddresses } from "./addresses";
+import {
+  currentGeneration,
+  defaultEthRoute,
+  requireFactory,
+  resolveAddresses,
+} from "./addresses";
 import { RallyError } from "./errors";
 import {
   parseLaunchReceipt,
@@ -174,6 +179,22 @@ export function createRallyClient(config: RallyClientConfig) {
     return { hash, receipt };
   }
 
+    /**
+   * The (hook, factory) a launch receipt is parsed against.
+   *
+   * `Launched` comes from the HOOK and `FirstBuy` from the FACTORY, and both are
+   * per-generation: a v2 launch emits from the v2 pair, so parsing it against the v1
+   * addresses finds neither and reports a successful launch as unparseable. Falls back
+   * to v1's when the chain has no v2 deployment, which is also what an omitted version
+   * means.
+   */
+  function receiptTargets(protocolVersion?: 1 | 2): [Address, Address | undefined] {
+    const gen = protocolVersion === 2 ? currentGeneration(addresses, 2) : undefined;
+    return gen
+      ? [gen.launchHook, gen.rallyFactory]
+      : [addresses.launchHook, addresses.rallyFactory];
+  }
+
   return {
     /** The resolved contract set for this chain. */
     addresses,
@@ -238,6 +259,8 @@ export function createRallyClient(config: RallyClientConfig) {
         {
           client: publicClient,
           addresses,
+          // v1's. A v2 launch resolves its own factory from `v2Deployments` inside
+          // `prepareLaunch`, since the two are different contracts.
           factory: requireFactory(addresses),
           account: account(),
           feePolicy,
@@ -288,19 +311,23 @@ export function createRallyClient(config: RallyClientConfig) {
 
       step("confirming");
       const receipt = await waitForTransactionReceipt(publicClient, { hash });
-      const parsed = parseLaunchReceipt(receipt, addresses.launchHook, addresses.rallyFactory);
+      const parsed = parseLaunchReceipt(receipt, ...receiptTargets(params.protocolVersion));
       return { ...parsed, transactionHash: hash, receipt, prepared };
     },
 
     /** Parse a launch receipt you submitted yourself. */
-    parseLaunchReceipt(receipt: TransactionReceipt) {
-      return parseLaunchReceipt(receipt, addresses.launchHook, addresses.rallyFactory);
+    parseLaunchReceipt(receipt: TransactionReceipt, protocolVersion?: 1 | 2) {
+      return parseLaunchReceipt(receipt, ...receiptTargets(protocolVersion));
     },
 
     /** Wait for a launch transaction and parse it. */
-    async waitForLaunch(hash: Hex): Promise<LaunchResult> {
+    async waitForLaunch(hash: Hex, protocolVersion?: 1 | 2): Promise<LaunchResult> {
       const receipt = await waitForTransactionReceipt(publicClient, { hash });
-      return { ...parseLaunchReceipt(receipt, addresses.launchHook, addresses.rallyFactory), transactionHash: hash, receipt };
+      return {
+        ...parseLaunchReceipt(receipt, ...receiptTargets(protocolVersion)),
+        transactionHash: hash,
+        receipt,
+      };
     },
 
     /** Front-load the SIWE prompt (hosted pinner only), so it isn't mid-launch. */

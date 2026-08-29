@@ -21,10 +21,27 @@
  */
 import { encodeAbiParameters, encodeFunctionData, parseAbi, type Address, type Hex } from "viem";
 import { getBlock, readContract } from "viem/actions";
-import { erc20Abi, rallyHookAbi, rallyRouterAbi, uniswapV3PoolAbi } from "./abis";
+import {
+  erc20Abi,
+  poolManagerAbi,
+  rallyHookAbi,
+  rallyHookV2Abi,
+  rallyRouterAbi,
+  uniswapV3PoolAbi,
+} from "./abis";
 import { generationForHook, generationsOf, ZERO_ADDRESS } from "./addresses";
 import { RallyError } from "./errors";
-import { poolIdFor, poolKeyFor, sortCurrencies, V4, type PoolKey } from "./pool";
+import {
+  decodeSlot0,
+  poolIdFor,
+  poolKeyFor,
+  poolStateSlot,
+  priceWadFromSqrtPrice,
+  sortCurrencies,
+  V4,
+  type PoolKey,
+} from "./pool";
+import { ladderAmount, simulateSwap, sqrtPriceAtTick, type LadderPosition } from "./clmm";
 import {
   clmmAmountIn,
   clmmAmountOut,
@@ -175,6 +192,13 @@ function generationsToProbe(
     {
       launchHook: pinned.hook,
       rallyRouter: router,
+      // A hook this SDK version does not know is assumed v1. That is the conservative
+      // reading rather than a guess: v1 is what every unpinned deployment has been, and
+      // the v1 read path only calls views v2 also lacks, so it fails loudly (a reverted
+      // `poolPriceWad`) instead of silently pricing a v2 coin by v1's rules. Pin a known
+      // hook, or upgrade the SDK, to get v2 handling.
+      protocolVersion: known?.protocolVersion ?? 1,
+      curveShapes: known?.curveShapes,
       rallyFactory: pinned.factory ?? known?.rallyFactory,
       paramRegistry: pinned.paramRegistry ?? known?.paramRegistry ?? addresses.paramRegistry,
       launchLib: known?.launchLib ?? addresses.launchLib,
@@ -248,6 +272,22 @@ export async function resolveLaunch(
   const hook = gen.launchHook;
   const pid = poolIdFor(key);
   const phase = PHASES[Number(phases[found])] ?? "NONE";
+  const quoteIsCurrency0 = sortCurrencies(quoteAddress, token).quoteIsCurrency0;
+
+  if (gen.protocolVersion === 2) {
+    return resolveLaunchV2({
+      client,
+      addresses,
+      gen,
+      token,
+      quoteAddress,
+      quoteConfig,
+      key,
+      pid,
+      phase,
+      quoteIsCurrency0,
+    });
+  }
 
   const [quote, bonded, gradThreshold, launchedAt, graduatedAt, poolPriceWad, reserves, feeSplit] =
     await Promise.all([
@@ -276,6 +316,7 @@ export async function resolveLaunch(
     pid,
     quote,
     phase,
+    protocolVersion: 1,
     hook,
     router: gen.rallyRouter,
     factory: gen.rallyFactory,
@@ -293,8 +334,121 @@ export async function resolveLaunch(
       buybackBps: feeSplit.buybackBps,
       lpSupportBps: feeSplit.lpSupportBps,
     },
-    quoteIsCurrency0: sortCurrencies(quoteAddress, token).quoteIsCurrency0,
+    quoteIsCurrency0,
     poolKey: key,
+  };
+}
+
+/**
+ * Read a PROTOCOL v2 launch's state.
+ *
+ * The split from the v1 path is not stylistic: the two hooks answer different questions.
+ * v2 has no `poolPriceWad` and no `poolReserves`, because a v2 pool is an ordinary v4 pool
+ * and both are properties of POOL state rather than of the hook. So price comes from
+ * `slot0` on the PoolManager, and the reserves are the launch's own position ladder valued
+ * at that price, which is the same quantity `bondedOf` returns for the quote leg.
+ *
+ * The consequence a caller must not miss: `poolPriceWad` here is real SPOT in both phases,
+ * where a v1 curve coin's is pinned at `P(B)`. `protocolVersion` on the result is what
+ * tells the two apart.
+ */
+async function resolveLaunchV2(args: {
+  client: PublicClientLike;
+  addresses: RallyAddresses;
+  gen: HookGeneration;
+  token: Address;
+  quoteAddress: Address;
+  quoteConfig: (quote: Address) => Promise<QuoteConfig>;
+  key: PoolKey;
+  pid: Hex;
+  phase: Phase;
+  quoteIsCurrency0: boolean;
+}): Promise<LaunchState> {
+  const { client, addresses, gen, token, quoteAddress, key, pid, phase, quoteIsCurrency0 } = args;
+  const hook = gen.launchHook;
+  const v2 = (functionName: "bondedOf" | "gradThreshold" | "curvePresetOf" | "curveSupplyOf") =>
+    readContract(client, { address: hook, abi: rallyHookV2Abi, functionName, args: [pid] });
+
+  const [quote, bonded, gradThreshold, info, feeSplit, positions, slot0Word, preset] =
+    await Promise.all([
+      args.quoteConfig(quoteAddress),
+      v2("bondedOf"),
+      v2("gradThreshold"),
+      readContract(client, {
+        address: hook,
+        abi: rallyHookV2Abi,
+        functionName: "launchOf",
+        args: [pid],
+      }),
+      readContract(client, {
+        address: hook,
+        abi: rallyHookV2Abi,
+        functionName: "feeConfigOf",
+        args: [pid],
+      }),
+      readContract(client, {
+        address: hook,
+        abi: rallyHookV2Abi,
+        functionName: "positionsOf",
+        args: [pid],
+      }),
+      readContract(client, {
+        address: addresses.poolManager,
+        abi: poolManagerAbi,
+        functionName: "extsload",
+        args: [poolStateSlot(pid)],
+      }),
+      v2("curvePresetOf").catch(() => 0n),
+    ]);
+
+  const slot0 = decodeSlot0(slot0Word as Hex);
+  const ladder = (positions as readonly LadderPosition[]).map((p) => ({
+    tickLower: p.tickLower,
+    tickUpper: p.tickUpper,
+    liquidity: p.liquidity,
+  }));
+
+  return {
+    token,
+    pid,
+    quote,
+    phase,
+    protocolVersion: 2,
+    hook,
+    router: gen.rallyRouter,
+    factory: gen.rallyFactory,
+    paramRegistry: gen.paramRegistry,
+    launchLib: gen.launchLib,
+    bonded: bonded as bigint,
+    gradThreshold: gradThreshold as bigint,
+    launchedAt: Number(info[3]),
+    graduatedAt: Number(info[4]),
+    // Real spot, in BOTH phases. Not the v1 meaning of this field.
+    poolPriceWad: priceWadFromSqrtPrice(
+      slot0.sqrtPriceX96,
+      quoteIsCurrency0,
+      scaleFor(quote.decimals),
+    ),
+    // The ladder's two legs at the current price. `bondedOf` IS the quote leg, so it is
+    // reused rather than recomputed; the token leg is the mirror amount over the same
+    // positions. These are not a constant-product pair and must not be quoted against as
+    // one: see `quoteTrade`, which simulates the ladder instead.
+    reserves: {
+      quote: bonded as bigint,
+      token: ladderAmount(ladder, slot0.sqrtPriceX96, !quoteIsCurrency0),
+    },
+    feeSplit: {
+      creatorBps: feeSplit.creatorBps,
+      dividendBps: feeSplit.dividendBps,
+      buybackBps: feeSplit.buybackBps,
+      lpSupportBps: feeSplit.lpSupportBps,
+    },
+    quoteIsCurrency0,
+    poolKey: key,
+    sqrtPriceX96: slot0.sqrtPriceX96,
+    tick: slot0.tick,
+    curvePreset: Number(preset),
+    ladder,
   };
 }
 
@@ -340,6 +494,12 @@ export function quoteTrade(
   if (amountIn <= 0n) {
     throw new RallyError("INVALID_AMOUNT", "amountIn must be greater than zero.");
   }
+
+  // PROTOCOL v2 shares no pricing with v1 and must never fall through to the code below.
+  // v1 prices against a virtual constant-product reserve; a v2 pool is concentrated
+  // liquidity, and a constant-product quote against a shaped ladder is not approximately
+  // right, it is wrong by however far the trade walks past the range it started in.
+  if (launch.protocolVersion === 2) return quoteTradeV2(launch, params, input);
 
   const now = input.atTime ?? Math.floor(Date.now() / 1000);
   const onCurve = launch.phase === "CURVE";
@@ -426,6 +586,94 @@ export function quoteTrade(
   };
 }
 
+/**
+ * Price a trade on a PROTOCOL v2 launch, by simulating the swap against its ladder.
+ *
+ * Three things differ from v1, and all three come from the same fact — a v2 pool is an
+ * ordinary v4 pool:
+ *
+ *   1. **One path, both phases.** v1 branches on CURVE vs GRADUATED because the two are
+ *      different pricing mechanisms. v2's graduation is a latch, not a migration: the same
+ *      liquidity prices the trade either side of it, so there is nothing to branch on.
+ *   2. **The fee is asymmetric.** On a BUY the input is the quote and the pool charges the
+ *      fee itself, so the curve sees the input net of it. On a SELL the pool is forced to
+ *      charge nothing and the hook takes its cut off the quote OUTPUT (§5.1). Applying one
+ *      rule to both sides is the mistake this shape exists to prevent.
+ *   3. **The result is exact.** `simulateSwap` walks the same ticks `PoolManager` walks,
+ *      so the quote is the fill rather than an estimate — verified to the wei against a
+ *      live hook (see test/clmm.test.ts). It carries the tight tolerance accordingly.
+ */
+function quoteTradeV2(
+  launch: LaunchState,
+  params: CurveParams,
+  input: QuoteTradeParams,
+): TradeQuote {
+  const { side, amountIn } = input;
+  const ladder = launch.ladder;
+  if (!ladder || ladder.length === 0 || !launch.sqrtPriceX96) {
+    throw new RallyError(
+      "NO_PRICE",
+      `Cannot price ${launch.token}: its v2 position ladder was not read. Fetch the ` +
+        `launch through \`getLaunch\`, which reads it alongside the rest of the state.`,
+      { details: { token: launch.token } },
+    );
+  }
+
+  const now = input.atTime ?? Math.floor(Date.now() / 1000);
+  // One schedule, both phases: the anti-snipe decay during CURVE, the flat pool fee after.
+  const feeBps =
+    launch.phase === "CURVE"
+      ? curveFeeBps(
+          { startBps: params.feeStartBps, endBps: params.feeEndBps, decay: params.feeDecaySeconds },
+          launch.launchedAt,
+          now,
+        )
+      : params.poolFeeBps;
+
+  // The launch token is currency0 whenever the quote is currency1. A BUY pays quote and
+  // receives token, so it moves the price toward the token side.
+  const zeroForOne = side === "buy" ? launch.quoteIsCurrency0 : !launch.quoteIsCurrency0;
+
+  let amountOut: bigint;
+  let feeQuote: bigint;
+  let result: ReturnType<typeof simulateSwap>;
+  if (side === "buy") {
+    // The pool takes the fee off the input before any of it reaches the curve.
+    feeQuote = (amountIn * feeBps) / 10_000n;
+    result = simulateSwap(ladder, launch.sqrtPriceX96, zeroForOne, amountIn - feeQuote, true);
+    amountOut = result.amountOut;
+  } else {
+    // The whole input reaches the curve; the hook takes its cut off the quote produced.
+    result = simulateSwap(ladder, launch.sqrtPriceX96, zeroForOne, amountIn, true);
+    feeQuote = (result.amountOut * feeBps) / 10_000n;
+    amountOut = result.amountOut - feeQuote;
+  }
+
+  // Graduation is a price event in v2, not a counter: the launch latches when the tick
+  // reaches `gradTickOf`. Comparing the post-trade price against the top of the ladder is
+  // the same test the hook runs in `afterSwap`.
+  const topTick = ladder.reduce((hi, p) => (p.tickUpper > hi ? p.tickUpper : hi), -887272);
+  const crossesGraduation =
+    launch.phase === "CURVE" && result.sqrtPriceX96 >= sqrtPriceAtTick(topTick);
+
+  const slippageBps = input.slippageBps ?? toleranceFor(!result.exhausted);
+  return {
+    side,
+    amountIn,
+    amountOut,
+    minAmountOut: applySlippage(amountOut, slippageBps),
+    slippageBps,
+    feeBps,
+    feeQuote,
+    // Real spot in both phases, which is the v2 meaning of this field.
+    priceWad: launch.poolPriceWad,
+    crossesGraduation,
+    // The ladder running dry is the one case the simulation cannot answer exactly.
+    exact: !result.exhausted,
+    phase: launch.phase,
+  };
+}
+
 export interface QuoteTradeExactOutParams {
   side: TradeSide;
   /** Exact-output amount, in the output leg's base units. */
@@ -449,6 +697,7 @@ export function quoteTradeExactOut(
   params: CurveParams,
   input: QuoteTradeExactOutParams,
 ): TradeQuoteExactOut {
+  if (launch.protocolVersion === 2) return quoteTradeExactOutV2(launch, params, input);
   const curve = launch.phase === "CURVE" ? curveOf(launch, params) : null;
   if (!curve) {
     const { quote: quoteReserve, token: tokenReserve } = launch.reserves;
@@ -535,6 +784,84 @@ export function quoteTradeExactOut(
     crossesGraduation: preview.crossesGraduation,
     slippageBps,
     exact: !preview.crossesGraduation,
+    phase: launch.phase,
+  };
+}
+
+/**
+ * Exact-output pricing for a PROTOCOL v2 launch: what `amountOut` will cost.
+ *
+ * The fee sides mirror {quoteTradeV2}, which is what makes this an inverse rather than an
+ * approximation of one. A BUY names the tokens it wants, so the curve is asked for that
+ * output and the pool's fee is grossed back UP onto the quote input. A SELL names the
+ * quote it wants NET of the hook's cut, so the target is grossed up before the ladder is
+ * walked and the input is the tokens that reach it.
+ */
+function quoteTradeExactOutV2(
+  launch: LaunchState,
+  params: CurveParams,
+  input: QuoteTradeExactOutParams,
+): TradeQuoteExactOut {
+  const ladder = launch.ladder;
+  if (!ladder || ladder.length === 0 || !launch.sqrtPriceX96) {
+    throw new RallyError(
+      "NO_PRICE",
+      `Cannot price ${launch.token}: its v2 position ladder was not read. Fetch the ` +
+        `launch through \`getLaunch\`, which reads it alongside the rest of the state.`,
+      { details: { token: launch.token } },
+    );
+  }
+  const now = input.atTime ?? Math.floor(Date.now() / 1000);
+  const feeBps =
+    launch.phase === "CURVE"
+      ? curveFeeBps(
+          { startBps: params.feeStartBps, endBps: params.feeEndBps, decay: params.feeDecaySeconds },
+          launch.launchedAt,
+          now,
+        )
+      : params.poolFeeBps;
+  const side = input.side;
+  const zeroForOne = side === "buy" ? launch.quoteIsCurrency0 : !launch.quoteIsCurrency0;
+
+  let amountIn: bigint;
+  let feeQuote: bigint;
+  let result: ReturnType<typeof simulateSwap>;
+  if (side === "buy") {
+    // Ask the curve for the tokens, then gross the quote input back up by the pool's fee.
+    result = simulateSwap(ladder, launch.sqrtPriceX96, zeroForOne, input.amountOut, false);
+    const gross = (result.amountIn * BPS) / (BPS - feeBps);
+    feeQuote = gross - result.amountIn;
+    amountIn = gross;
+  } else {
+    // `amountOut` is quote the trader keeps, so the ladder has to produce it plus the
+    // hook's cut.
+    const gross = (input.amountOut * BPS) / (BPS - feeBps);
+    result = simulateSwap(ladder, launch.sqrtPriceX96, zeroForOne, gross, false);
+    feeQuote = gross - input.amountOut;
+    amountIn = result.amountIn;
+  }
+
+  if (result.exhausted) {
+    throw new RallyError(
+      "INVALID_AMOUNT",
+      `Cannot fill ${input.amountOut}: it exceeds what ${launch.token}'s curve holds. ` +
+        `On-chain this reverts rather than filling partially.`,
+      { details: { wanted: input.amountOut, token: launch.token } },
+    );
+  }
+
+  const topTick = ladder.reduce((hi, p) => (p.tickUpper > hi ? p.tickUpper : hi), -887272);
+  const crossesGraduation =
+    launch.phase === "CURVE" && result.sqrtPriceX96 >= sqrtPriceAtTick(topTick);
+  const slippageBps = input.slippageBps ?? toleranceFor(true);
+  return {
+    amountIn,
+    // Exact-out bounds the INPUT from above, so the tolerance widens rather than cuts.
+    maxAmountIn: (amountIn * (BPS + slippageBps)) / BPS,
+    feeQuote,
+    crossesGraduation,
+    slippageBps,
+    exact: true,
     phase: launch.phase,
   };
 }

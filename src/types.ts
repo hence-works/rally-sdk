@@ -3,6 +3,9 @@
  * the SDK returns without reaching into implementation files.
  */
 import type { Account, Address, Chain, Client, Hex, Transport } from "viem";
+import type { LadderPosition } from "./clmm";
+
+export type { LadderPosition };
 
 /**
  * The contract set for one chain. Bundled per-chain (see `deployments.ts`) and
@@ -49,6 +52,42 @@ export interface RallyAddresses {
    * neither is an error.
    */
   legacyDeployments?: LegacyDeployment[];
+  /**
+   * Every PROTOCOL v2 generation on this chain, newest first.
+   *
+   * v2 is a second launch layer, not a redeploy of this one. Hooks live in the PoolKey, so
+   * v1 and v2 run side by side indefinitely and BOTH are current: a v1 coin keeps trading
+   * on the v1 hook forever, and a new launch goes to whichever generation the caller
+   * targets. It is kept apart from `legacyDeployments` because that list means "retired
+   * but still serving its coins", and because the two protocols differ in what they emit
+   * and how they price a curve trade.
+   *
+   * Absent means the chain has no v2 deployment, which is not an error.
+   */
+  v2Deployments?: V2Deployment[];
+}
+
+/**
+ * One PROTOCOL v2 generation. Role-named like `LegacyDeployment`, so a caller that only
+ * needs an address can treat the two uniformly: `launchHook` is `RallyHookV2`,
+ * `rallyFactory` is `RallyFactoryV2`.
+ */
+export interface V2Deployment {
+  launchHook: Address;
+  rallyFactory: Address;
+  /** Pinned to one hook, so a v2 generation ships its own instance. */
+  rallyRouter: Address;
+  paramRegistry: Address;
+  launchLib: Address;
+  /**
+   * `RallyCurveShapes`, the preset table a v2 launch's geometry is built from. No v1
+   * equivalent. It is a constructor argument to both the hook and the factory, so it
+   * belongs to the generation and not to the chain.
+   */
+  curveShapes?: Address;
+  rallyVault?: Address;
+  dividendDistributor?: Address;
+  deploymentBlock: number;
 }
 
 /** One retired hook generation that still serves the coins launched under it. */
@@ -93,6 +132,25 @@ export interface LegacyDeployment {
 export interface HookGeneration {
   launchHook: Address;
   rallyRouter: Address;
+  /**
+   * Which PROTOCOL this generation runs: 1 for `RallyHook`, 2 for `RallyHookV2`.
+   *
+   * Not cosmetic. It decides how a curve trade is priced, which is the one thing a host
+   * cannot get wrong quietly:
+   *   - v1's curve is VIRTUAL. The pool holds no liquidity during CURVE, its price is
+   *     pinned at the graduation price `P(B)`, and spot must be derived from the curve at
+   *     the current `b` (`pricePerTokenWad`). Reading `poolPriceWad` overstates a curve
+   *     coin by the whole remaining curve.
+   *   - v2's curve IS the pool's liquidity. It quotes and prices like any v4 pool from
+   *     block one, so `poolPriceWad` is spot in BOTH phases and the v1 derivation would be
+   *     wrong instead.
+   *
+   * Read it off the generation a coin belongs to, never off the chain: both protocols are
+   * live on a chain at once.
+   */
+  protocolVersion: 1 | 2;
+  /** v2 only: the shape table this generation's launches are built from. */
+  curveShapes?: Address;
   /** Absent for a generation deployed before the creation path split out of the hook. */
   rallyFactory?: Address;
   /** The registry this generation's hook reads its params from. */
@@ -284,6 +342,29 @@ export interface LaunchState {
   paramRegistry: Address;
   /** The CREATE2 deployer of this coin's generation, when known. */
   launchLib?: Address;
+  /**
+   * Which PROTOCOL this coin runs on: 1 for `RallyHook`, 2 for `RallyHookV2`. Permanent,
+   * since a v4 hook is part of the PoolKey.
+   *
+   * Branch on this before reading `poolPriceWad` or quoting a curve trade. On v1 the field
+   * is `P(B)` during CURVE and spot only after graduation, and a trade is priced against a
+   * virtual constant-product reserve; on v2 it is spot in both phases and a trade is priced
+   * by walking `ladder`. Using either protocol's rule on the other is wrong by the whole
+   * remaining curve, not by a rounding error.
+   */
+  protocolVersion: 1 | 2;
+  /** v2 only: the pool's live `sqrtPriceX96`, which `poolPriceWad` is derived from. */
+  sqrtPriceX96?: bigint;
+  /** v2 only: the pool's live tick. Graduation latches when it reaches `gradTickOf`. */
+  tick?: number;
+  /** v2 only: the curve SHAPE this launch was opened with (§4.2), frozen at creation. */
+  curvePreset?: number;
+  /**
+   * v2 only: the launch's position ladder, which IS its bonding curve. Read once with the
+   * rest of the state so a quote needs no further round trip. Ranges may NEST, so the
+   * liquidity at a price is a sum across positions rather than one position's.
+   */
+  ladder?: LadderPosition[];
 }
 
 export type TradeSide = "buy" | "sell";
