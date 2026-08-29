@@ -46,5 +46,18 @@ export const DEPLOYMENTS: Record<number, RallyAddresses> = {
     dividendDistributor: "0xE1F1e2890CA088e08662D2344FD8391105C4e531",
     rallyVault: "0x5bd485A3059D459eA6D6DFd49fE7a2Ff2Af67C11",
     gachaVault: "0x937a1EDBff87165850F848F9F377D1Aa4611ba91",
+    v2Deployments: [
+      {
+        launchHook: "0xf836BFC3116Cebe648d72782DBbaA9f299BaA8Cc",
+        rallyFactory: "0x09F1120D0413377631FdEF4053ae700906C4ccD4",
+        rallyRouter: "0x84291FB55529776B7AaD7641C6E9eC760F325c70",
+        paramRegistry: "0x5ab19e16e1196642D89243d2910B4c9045E9A5cD",
+        launchLib: "0xd8CdE394c1edcE8e08eCe0f3D955b6aed0d9eeC6",
+        curveShapes: "0xF29662C90741B801e6A19Af87c195a74933B9638",
+        rallyVault: "0x0000000000000000000000000000000000000000",
+        dividendDistributor: "0x0000000000000000000000000000000000000000",
+        deploymentBlock: 11585626,
+      },
+    ],
   },
 };
