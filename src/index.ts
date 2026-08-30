@@ -42,6 +42,7 @@ export {
   erc20Abi,
   rallyFactoryAbi,
   rallyFactoryV2Abi,
+  rallyCurveShapesAbi,
   poolManagerAbi,
   rallyHookAbi,
   rallyHookV2Abi,
@@ -70,6 +71,7 @@ export type { PoolKey, Slot0 } from "./pool";
 // `LaunchState.protocolVersion`; these are exported for hosts that want the pieces.
 export {
   amount0Delta,
+  curvePricePoints,
   amount1Delta,
   ladderAmount,
   liquidityAt,
@@ -81,7 +83,7 @@ export {
   MIN_SQRT_PRICE,
   MIN_TICK,
 } from "./clmm";
-export type { LadderPosition, SwapResult } from "./clmm";
+export type { CurvePricePoint, LadderPosition, SwapResult } from "./clmm";
 
 // Salts & vanity mining
 export {
@@ -126,6 +128,18 @@ export {
   tokensOutForBuy,
 } from "./curve";
 export type { Curve, CurveCostPreview, CurveFeeParams, CurvePreview } from "./curve";
+
+// Protocol v2 curve shapes: the preset table, and validating a shape of your own. The
+// shape is frozen at launch, so these are the reads a host shows a creator BEFORE they
+// commit to one.
+export {
+  CURVE_PRESETS,
+  previewLaunchCurve,
+  readCurveShapes,
+  segmentsFromWeights,
+  validateCurveSegments,
+} from "./shapes";
+export type { CurvePresetKey } from "./shapes";
 
 // Governance params
 export { REGISTRY_KEYS, readCurveParams, readFeePolicy, readParam, readParams } from "./params";
@@ -188,6 +202,8 @@ export type {
 // Shared types
 export type {
   CurveParams,
+  CurveSegment,
+  CurveShapes,
   FeePolicy,
   FeeSplit,
   HookGeneration,

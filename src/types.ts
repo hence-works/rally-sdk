@@ -68,6 +68,43 @@ export interface RallyAddresses {
 }
 
 /**
+ * One band of a v2 curve: a stretch of the launch's tick span, and the share of the
+ * curve's tokens placed across it.
+ *
+ * `startBps`/`endBps` are basis points of the span from the launch price to the
+ * graduation price, so a segment is positioned relatively and the same shape works for
+ * any `B`. `sharesBps` across all segments must total 10000. `numPositions` is how many
+ * ranges that band is split into, which is what makes a band a smooth ramp rather than a
+ * step. `anchorAtFar` decides which edge of the band its positions bunch toward.
+ */
+export interface CurveSegment {
+  startBps: number;
+  endBps: number;
+  numPositions: number;
+  sharesBps: number;
+  anchorAtFar: boolean;
+}
+
+/** The v2 shape surface for one generation, as `readCurveShapes` reports it. */
+export interface CurveShapes {
+  /** The `RallyCurveShapes` this describes. Per generation, not per chain. */
+  address: Address;
+  /** Whether a creator may launch on a bespoke shape rather than a preset. */
+  customAllowed: boolean;
+  maxSegments: number;
+  /** Positions across a whole shape, not per segment. */
+  maxPositionsTotal: number;
+  presets: Array<{
+    id: number;
+    key: string;
+    name: string;
+    description: string;
+    /** Undefined when governance has not configured that id. */
+    segments?: CurveSegment[];
+  }>;
+}
+
+/**
  * One PROTOCOL v2 generation. Role-named like `LegacyDeployment`, so a caller that only
  * needs an address can treat the two uniformly: `launchHook` is `RallyHookV2`,
  * `rallyFactory` is `RallyFactoryV2`.

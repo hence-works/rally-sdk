@@ -181,6 +181,10 @@ export const erc20Abi = parseAbi([
  */
 export const rallyFactoryV2Abi = parseAbi([
   "function launch(string name, string symbol, string metadataURI, bytes32 salt, address quote, uint256 initialBuy, (uint16 creatorBps, uint16 dividendBps, uint16 buybackBps, uint16 lpSupportBps) feeConfig, uint8 curvePreset) returns (bytes32 pid, address token)",
+  // A shape of the creator's own rather than a preset (§4.5). Gated by
+  // `RallyCurveShapes.customAllowed`, and held to the same guards a preset passes: the
+  // shape rules, the hook's allocation band, and its opening-depth window.
+  "function launchCustom(string name, string symbol, string metadataURI, bytes32 salt, address quote, uint256 initialBuy, (uint16 creatorBps, uint16 dividendBps, uint16 buybackBps, uint16 lpSupportBps) feeConfig, (uint16 startBps, uint16 endBps, uint16 numPositions, uint16 sharesBps, bool anchorAtFar)[] segments) returns (bytes32 pid, address token)",
   "function launch(string name, string symbol, string metadataURI, bytes32 salt, address quote, uint256 initialBuy, (uint16 creatorBps, uint16 dividendBps, uint16 buybackBps, uint16 lpSupportBps) feeConfig) returns (bytes32 pid, address token)",
   "function launch(string name, string symbol, string metadataURI, bytes32 salt, address quote, uint256 initialBuy) returns (bytes32 pid, address token)",
   "function predictToken(bytes32 salt, string name, string symbol) view returns (address)",
@@ -234,6 +238,28 @@ export const rallyHookV2Abi = parseAbi([
   "function creatorFees(bytes32 pid) view returns (uint256)",
   "function referralPendingOf(bytes32 pid) view returns (uint256)",
   "function claimCreatorFees(bytes32 pid) returns (uint256)",
+]);
+
+/**
+ * RallyCurveShapes — the v2 preset table and the rules a shape has to satisfy.
+ *
+ * Reads only. `validate` is `pure`, so a host can check a bespoke shape before it mines a
+ * salt or pins any metadata, rather than discovering it at the launch transaction.
+ */
+export const rallyCurveShapesAbi = parseAbi([
+  "function presetOf(uint8 id) view returns ((uint16 startBps, uint16 endBps, uint16 numPositions, uint16 sharesBps, bool anchorAtFar)[])",
+  "function validate((uint16 startBps, uint16 endBps, uint16 numPositions, uint16 sharesBps, bool anchorAtFar)[] segments) pure returns (uint256 positions)",
+  // Whether a creator may launch on a shape of their own at all. Governance can close
+  // this without touching a live launch, so it is read rather than assumed.
+  "function customAllowed() view returns (bool)",
+  "function MAX_SEGMENTS() view returns (uint256)",
+  // Positions across a WHOLE shape, not per segment: each one is a `modifyLiquidity` on
+  // every fee collection and a candidate tick crossing on every swap.
+  "function MAX_POSITIONS_TOTAL() view returns (uint256)",
+  // The whole layout a launch WOULD get, before it exists. Pure geometry, so a host can
+  // price a prospective first buy against the real ladder instead of against v1's
+  // constant-product curve, which describes a different coin.
+  "function buildCurve((uint8 curvePreset, (uint16 startBps, uint16 endBps, uint16 numPositions, uint16 sharesBps, bool anchorAtFar)[] segments, uint256 totalSupply, uint256 curveAllocBps, uint256 B, uint256 tailBps, int24 tickSpacing, bool tokenIsCurrency0) params) view returns ((int24 tickLower, int24 tickUpper, uint128 liquidity, bytes32 salt)[] positions, uint256 curveSupply, int24 tickLower, int24 tickUpper)",
 ]);
 
 export const poolManagerAbi = parseAbi([

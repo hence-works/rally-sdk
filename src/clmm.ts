@@ -190,6 +190,55 @@ function nextFromAmount1(sqrtP: bigint, liquidity: bigint, amount: bigint, add: 
   return sqrtP - quotient;
 }
 
+/** One point on a curve: what a token costs once this much quote is in. */
+export interface CurvePricePoint {
+  sqrtPriceX96: bigint;
+  /** Quote the ladder holds at this price. 0 at the open, `B` at the top. */
+  quoteLocked: bigint;
+  /** Quote per whole token, decimal-normalised WAD. */
+  priceWad: bigint;
+}
+
+/**
+ * The shape of a curve as a price-versus-quote-raised series.
+ *
+ * This is what a curve shape actually MEANS to anyone looking at one: how fast the price
+ * climbs as money comes in. A segment list does not say that, and neither does a bar
+ * chart of liquidity depth, because depth and price move inversely and over a range whose
+ * ends are set by `B`.
+ *
+ * Sampled by PRICE rather than by simulating buys: the quote a ladder holds at a price is
+ * a closed form (`ladderAmount`), so a whole curve costs a few dozen evaluations and no
+ * swap simulation. Both axes are exact at every point.
+ *
+ * Ticks are sampled linearly, which spaces the points evenly in log-price, so the early
+ * stretch of the curve gets the resolution it needs.
+ */
+export function curvePricePoints(
+  ladder: readonly LadderPosition[],
+  scale: bigint,
+  samples = 48,
+): CurvePricePoint[] {
+  if (ladder.length === 0) return [];
+  const lo = ladder.reduce((m, p) => (p.tickLower < m ? p.tickLower : m), MAX_TICK);
+  // The tail runs to the top of the usable range, so the chart would be mostly empty if
+  // it were included. Bound at the highest tick that is not the tail's.
+  const uppers = [...new Set(ladder.map((p) => p.tickUpper))].sort((a, b) => a - b);
+  const hi = uppers.length > 1 ? uppers[uppers.length - 2]! : uppers[0]!;
+  const out: CurvePricePoint[] = [];
+  for (let i = 0; i <= samples; i++) {
+    const tick = Math.round(lo + ((hi - lo) * i) / samples);
+    const sqrtPriceX96 = sqrtPriceAtTick(tick);
+    out.push({
+      sqrtPriceX96,
+      quoteLocked: ladderAmount(ladder, sqrtPriceX96, false),
+      // A v2 launch token is always currency0 (I-7), so the quote is currency1.
+      priceWad: (((sqrtPriceX96 * sqrtPriceX96) >> 96n) * scale) >> 96n,
+    });
+  }
+  return out;
+}
+
 export interface SwapResult {
   /** Consumed of the input currency. Below the request only when the ladder ran dry. */
   amountIn: bigint;

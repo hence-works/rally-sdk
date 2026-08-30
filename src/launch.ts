@@ -26,6 +26,7 @@ import { mineVanitySalt } from "./mine";
 import { poolIdOf } from "./pool";
 import { packSalt, saltCreator, type Vanity } from "./salt";
 import type {
+  CurveSegment,
   FeePolicy,
   FeeSplit,
   LaunchMetadata,
@@ -65,6 +66,16 @@ export interface LaunchParams {
    * argument would hand a creator a coin they did not ask for.
    */
   curvePreset?: number;
+  /**
+   * v2 only: a curve shape of the creator's own, instead of a preset (§4.5).
+   *
+   * Mutually exclusive with `curvePreset`. Gated on chain by
+   * `RallyCurveShapes.customAllowed`, and held to the same guards a preset passes, so this
+   * is not an escape hatch from the curve rules. Validate it with `validateCurveSegments`
+   * before mining a salt: a shape the table rejects fails the launch transaction, which is
+   * long after the metadata has been pinned.
+   */
+  curveSegments?: CurveSegment[];
   /**
    * Quote asset: an allowlisted address, or `"WETH"` / `"USDC"` for the chain's
    * canonical ones. Each quote carries its own launch fee and graduation threshold.
@@ -598,12 +609,20 @@ export async function prepareLaunch(
       { details: { chainId: addresses.chainId } },
     );
   }
-  if (params.curvePreset !== undefined && protocolVersion !== 2) {
+  const shaped = params.curvePreset !== undefined || params.curveSegments !== undefined;
+  if (shaped && protocolVersion !== 2) {
     throw new RallyError(
       "INVALID_AMOUNT",
-      "`curvePreset` is a protocol v2 option: v1 has a single curve shape. Pass " +
+      "Curve shapes are a protocol v2 option: v1 has a single curve shape. Pass " +
         "`protocolVersion: 2` to choose one.",
       { details: { curvePreset: params.curvePreset } },
+    );
+  }
+  if (params.curvePreset !== undefined && params.curveSegments !== undefined) {
+    throw new RallyError(
+      "INVALID_AMOUNT",
+      "Pass either `curvePreset` (one of the shipped shapes) or `curveSegments` (your " +
+        "own), not both.",
     );
   }
   const factory = protocolVersion === 2 ? generation!.rallyFactory! : ctx.factory;
@@ -799,7 +818,19 @@ export async function prepareLaunch(
   // omitting a preset defers to flat the same way.
   const base = [name, symbol, metadataURI, salt, quote.address, initialBuy] as const;
   const data =
-    protocolVersion === 2 && params.curvePreset !== undefined
+    protocolVersion === 2 && params.curveSegments !== undefined
+      ? encodeFunctionData({
+          abi: rallyFactoryV2Abi,
+          functionName: "launchCustom",
+          args: [
+            ...base,
+            // Same reasoning as the preset overload below: naming a shape must not
+            // silently change the split.
+            params.fees ?? (await readV2DefaultFees(client, factory)),
+            params.curveSegments,
+          ],
+        })
+      : protocolVersion === 2 && params.curvePreset !== undefined
       ? encodeFunctionData({
           abi: rallyFactoryV2Abi,
           functionName: "launch",
