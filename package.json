@@ -1,7 +1,7 @@
 {
   "name": "@rally-fun/sdk",
   "version": "0.2.0",
-  "description": "Launch and trade Rally coins from any app \u2014 headless TypeScript SDK for the Rally launchpad (Uniswap v4 bonding curve + graduation).",
+  "description": "Launch and trade Rally coins from any app \u2014 headless TypeScript SDK for Rally, the programmable market layer for humans + agents (Uniswap v4 bonding curve + graduation).",
   "license": "MIT",
   "author": "Rally",
   "homepage": "https://www.rallypad.fun",

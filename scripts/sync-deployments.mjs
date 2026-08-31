@@ -99,6 +99,7 @@ const v2 = (m) => {
         `launchLib: ${field(g.LaunchLib)}`,
       ];
       if (g.CurveShapes !== undefined) parts.push(`curveShapes: ${field(g.CurveShapes)}`);
+      if (g.Lens !== undefined) parts.push(`lens: ${field(g.Lens)}`);
       if (g.RallyVault !== undefined) parts.push(`rallyVault: ${field(g.RallyVault)}`);
       if (g.DividendDistributor !== undefined) {
         parts.push(`dividendDistributor: ${field(g.DividendDistributor)}`);

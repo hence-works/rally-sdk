@@ -25,7 +25,7 @@ import {
   erc20Abi,
   poolManagerAbi,
   rallyHookAbi,
-  rallyHookV2Abi,
+  rallyLensV2Abi,
   rallyRouterAbi,
   uniswapV3PoolAbi,
 } from "./abis";
@@ -199,6 +199,7 @@ function generationsToProbe(
       // hook, or upgrade the SDK, to get v2 handling.
       protocolVersion: known?.protocolVersion ?? 1,
       curveShapes: known?.curveShapes,
+      lens: known?.lens,
       rallyFactory: pinned.factory ?? known?.rallyFactory,
       paramRegistry: pinned.paramRegistry ?? known?.paramRegistry ?? addresses.paramRegistry,
       launchLib: known?.launchLib ?? addresses.launchLib,
@@ -242,15 +243,21 @@ export async function resolveLaunch(
       key: poolKeyFor(quote, token, gen.launchHook),
     })),
   );
+  // `phaseOf` lives on a different contract per protocol: v1's hook answers it directly,
+  // v2's does not have it at all (the hook keeps one state accessor so it fits under
+  // EIP-170 permanently) and its lens does. Probing a v2 hook with v1's ABI reverts, which
+  // the catch below would swallow as "no launch here" and report the coin as not found.
   const phases = await Promise.all(
-    candidates.map(({ gen, key }) =>
-      readContract(client, {
-        address: gen.launchHook,
-        abi: rallyHookAbi,
+    candidates.map(({ gen, key }) => {
+      const via = gen.protocolVersion === 2 ? gen.lens : gen.launchHook;
+      if (!via) return Promise.resolve(0);
+      return readContract(client, {
+        address: via,
+        abi: gen.protocolVersion === 2 ? rallyLensV2Abi : rallyHookAbi,
         functionName: "phaseOf",
         args: [poolIdFor(key)],
-      }).catch(() => 0),
-    ),
+      }).catch(() => 0);
+    }),
   );
 
   const found = candidates.findIndex((_, i) => Number(phases[i]) !== 0);
@@ -366,30 +373,55 @@ async function resolveLaunchV2(args: {
 }): Promise<LaunchState> {
   const { client, addresses, gen, token, quoteAddress, key, pid, phase, quoteIsCurrency0 } = args;
   const hook = gen.launchHook;
+  // Every per-pool read goes through the generation's LENS, not its hook. The hook keeps
+  // one state accessor and no getters so it can stay under EIP-170 forever, since a v4
+  // hook's address encodes its permissions and can never be replaced without abandoning
+  // every pool it hosts.
+  const lens = gen.lens;
+  if (!lens) {
+    throw new RallyError(
+      "MISSING_ADDRESS",
+      `Protocol v2 hook ${hook} on chain ${addresses.chainId} has no RallyLensV2 recorded, ` +
+        `so its launches cannot be read. Upgrade the SDK, or pass the generation's \`lens\` ` +
+        `through \`addresses.v2Deployments\`.`,
+      { details: { chainId: addresses.chainId, hook } },
+    );
+  }
   const v2 = (functionName: "bondedOf" | "gradThreshold" | "curvePresetOf" | "curveSupplyOf") =>
-    readContract(client, { address: hook, abi: rallyHookV2Abi, functionName, args: [pid] });
+    readContract(client, { address: lens, abi: rallyLensV2Abi, functionName, args: [pid] });
 
-  const [quote, bonded, gradThreshold, info, feeSplit, positions, slot0Word, preset] =
+  const [quote, bonded, gradThreshold, info, feeSplit, positions, support, slot0Word, preset] =
     await Promise.all([
       args.quoteConfig(quoteAddress),
       v2("bondedOf"),
       v2("gradThreshold"),
       readContract(client, {
-        address: hook,
-        abi: rallyHookV2Abi,
+        address: lens,
+        abi: rallyLensV2Abi,
         functionName: "launchOf",
         args: [pid],
       }),
       readContract(client, {
-        address: hook,
-        abi: rallyHookV2Abi,
+        address: lens,
+        abi: rallyLensV2Abi,
         functionName: "feeConfigOf",
         args: [pid],
       }),
       readContract(client, {
-        address: hook,
-        abi: rallyHookV2Abi,
+        address: lens,
+        abi: rallyLensV2Abi,
         functionName: "positionsOf",
+        args: [pid],
+      }),
+      // The protocol-owned support band (§5.6), which is a real position in the same pool
+      // and NOT part of `positionsOf`. Zero-liquidity until the first flush places it, and
+      // a flush is graduated-only, so this is empty for the whole curve and then starts
+      // carrying depth. Leaving it out priced a graduated coin against less liquidity than
+      // the pool holds, which shows up as slippage the swap does not actually incur.
+      readContract(client, {
+        address: lens,
+        abi: rallyLensV2Abi,
+        functionName: "supportOf",
         args: [pid],
       }),
       readContract(client, {
@@ -402,11 +434,18 @@ async function resolveLaunchV2(args: {
     ]);
 
   const slot0 = decodeSlot0(slot0Word as Hex);
-  const ladder = (positions as readonly LadderPosition[]).map((p) => ({
-    tickLower: p.tickLower,
-    tickUpper: p.tickUpper,
-    liquidity: p.liquidity,
-  }));
+  // Curve ladder plus the support band: every position the hook owns, and so (I-6,
+  // `beforeAddLiquidity` reverts unconditionally) every position in the pool. The band
+  // OVERLAPS the ladder rather than extending it, which is fine — `simulateSwap` and
+  // `ladderAmount` both treat liquidity at a price as a SUM across positions, because a
+  // shaped v2 curve already nests.
+  const ladder = [...(positions as readonly LadderPosition[]), support as LadderPosition]
+    .filter((p) => p.liquidity > 0n && p.tickUpper > p.tickLower)
+    .map((p) => ({
+      tickLower: p.tickLower,
+      tickUpper: p.tickUpper,
+      liquidity: p.liquidity,
+    }));
 
   return {
     token,
@@ -429,12 +468,15 @@ async function resolveLaunchV2(args: {
       quoteIsCurrency0,
       scaleFor(quote.decimals),
     ),
-    // The ladder's two legs at the current price. `bondedOf` IS the quote leg, so it is
-    // reused rather than recomputed; the token leg is the mirror amount over the same
-    // positions. These are not a constant-product pair and must not be quoted against as
-    // one: see `quoteTrade`, which simulates the ladder instead.
+    // Both legs of everything in the pool at the current price, support band included.
+    //
+    // Deliberately NOT `bondedOf` for the quote leg, though the two agree for the whole
+    // curve. `bonded` measures progress and so counts the curve positions only; this
+    // measures depth and so counts the band too, which after graduation holds real quote.
+    // These are not a constant-product pair and must not be quoted against as one: see
+    // `quoteTrade`, which simulates the ladder instead.
     reserves: {
-      quote: bonded as bigint,
+      quote: ladderAmount(ladder, slot0.sqrtPriceX96, quoteIsCurrency0),
       token: ladderAmount(ladder, slot0.sqrtPriceX96, !quoteIsCurrency0),
     },
     feeSplit: {

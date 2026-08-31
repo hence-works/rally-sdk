@@ -108,6 +108,7 @@ export function generationsOf(addresses: RallyAddresses): HookGeneration[] {
     paramRegistry?: Address;
     launchLib?: Address;
     curveShapes?: Address;
+    lens?: Address;
     rallyVault?: Address;
     dividendDistributor?: Address;
     gachaVault?: Address;
@@ -142,6 +143,7 @@ export function generationsOf(addresses: RallyAddresses): HookGeneration[] {
       rallyRouter: g.rallyRouter,
       protocolVersion: version,
       curveShapes: usable(g.curveShapes) ? g.curveShapes : undefined,
+      lens: usable(g.lens) ? g.lens : undefined,
       rallyFactory: usable(g.rallyFactory) ? g.rallyFactory : undefined,
       // A v1 entry missing its registry or deployer reads the CURRENT v1 ones: the two
       // were the same contracts when such a manifest was written, so that is history. A

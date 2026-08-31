@@ -2,10 +2,11 @@
 
 Launch and trade [Rally](https://www.rallypad.fun) coins from your own app.
 
-Rally is a memecoin launchpad built as a Uniswap v4 hook: a virtual bonding curve that
-graduates atomically into a locked CLMM pool. This package is the headless client for
-it — no React, no wallet UI, no backend of its own. It is what a terminal, aggregator,
-bot, or chart site installs to let its own users create and trade coins in place.
+Rally is the programmable market layer for humans + agents, built as a Uniswap v4 hook:
+every trade settles through the v4 PoolManager, and a coin graduates atomically into a
+permanently locked full-range v4 position. This package is the headless client for it —
+no React, no wallet UI, no backend of its own. It is what a terminal, aggregator, bot,
+or chart site installs to let its own users create and trade coins in place.
 
 ```sh
 npm install @rally-fun/sdk viem

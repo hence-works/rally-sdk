@@ -1,9 +1,10 @@
 /**
  * @rally-fun/sdk — launch and trade Rally coins from any app.
  *
- * Rally is a memecoin launchpad built as a Uniswap v4 hook: a virtual bonding curve
- * that graduates atomically into a locked CLMM pool. This package is the headless
- * client for it — no React, no wallet UI, no backend of its own.
+ * Rally is the programmable market layer for humans + agents, built as a Uniswap v4
+ * hook: every trade settles through the v4 PoolManager, and a coin graduates
+ * atomically into a permanently locked full-range v4 position. This package is the
+ * headless client for it — no React, no wallet UI, no backend of its own.
  *
  *   import { createRallyClient } from "@rally-fun/sdk";
  *
@@ -46,6 +47,7 @@ export {
   poolManagerAbi,
   rallyHookAbi,
   rallyHookV2Abi,
+  rallyLensV2Abi,
   rallyParamRegistryAbi,
   rallyRouterAbi,
   rallyTokenAbi,

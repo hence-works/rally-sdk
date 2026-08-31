@@ -122,6 +122,16 @@ export interface V2Deployment {
    * belongs to the generation and not to the chain.
    */
   curveShapes?: Address;
+  /**
+   * `RallyLensV2`, the generation's read API. Every per-pool getter lives here rather than
+   * on the hook, which keeps one state accessor and no convenience getters so it can fit
+   * under EIP-170 permanently (its address encodes its permissions, so it can never be
+   * replaced without abandoning every pool it hosts).
+   *
+   * Per generation, not per chain: a lens is constructed against one hook, so a coin is
+   * read through the lens belonging to the hook it launched under.
+   */
+  lens?: Address;
   rallyVault?: Address;
   dividendDistributor?: Address;
   deploymentBlock: number;
@@ -188,6 +198,9 @@ export interface HookGeneration {
   protocolVersion: 1 | 2;
   /** v2 only: the shape table this generation's launches are built from. */
   curveShapes?: Address;
+  /** v2 only: `RallyLensV2`, where every per-pool read lives. Absent means this SDK
+   *  version's manifest predates the lens, and v2 state cannot be read for it. */
+  lens?: Address;
   /** Absent for a generation deployed before the creation path split out of the hook. */
   rallyFactory?: Address;
   /** The registry this generation's hook reads its params from. */
@@ -274,8 +287,19 @@ export interface FeeSplit {
 export interface FeePolicy {
   /** Fixed platform cut off the top of every fee. */
   platformBps: number;
-  /** Ceiling on `creatorBps`. */
+  /** Ceiling on `creatorBps` in the CURVE-ERA row. */
   creatorCapBps: number;
+  /**
+   * Ceiling on `creatorBps` in a v2 launch's POST-BREAKOUT row (§5.5), and deliberately
+   * the wider of the two: a coin that reached `B` has already funded its own buyback and
+   * LP-support war chest, so from breakout onward the creator may take more of the
+   * remainder.
+   *
+   * `undefined` on a registry deployed before the key existed, which is every v1-only
+   * chain. Treat that as "no second row here" rather than as zero, and let the chain do
+   * the enforcing.
+   */
+  breakoutCreatorCapBps?: number;
   /** Bitmask: 1 = dividend, 2 = buyback, 4 = lp-support. */
   mechanismMask: number;
   dividendEnabled: boolean;

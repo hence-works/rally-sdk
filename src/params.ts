@@ -145,10 +145,19 @@ export async function readFeePolicy(
     REGISTRY_KEYS.CREATOR_CAP_BPS,
     REGISTRY_KEYS.MECHANISM_ENABLE_MASK,
   ]);
+  // Read apart from the batch above, and allowed to fail. `BREAKOUT_CREATOR_CAP_BPS` is
+  // the newest key, so a registry deployed before it REVERTS on it rather than answering
+  // 0 — the ABI decoder rejects an out-of-range enum — and one revert would reject the
+  // whole `Promise.all`. Undefined means "this registry has no post-breakout row", which
+  // is the truth on every v1-only chain.
+  const breakoutCap = await readParam(client, registry, REGISTRY_KEYS.BREAKOUT_CREATOR_CAP_BPS)
+    .then((v) => Number(v))
+    .catch(() => undefined);
   const mechanismMask = Number(mask!);
   return {
     platformBps: Number(platform!),
     creatorCapBps: Number(cap!),
+    breakoutCreatorCapBps: breakoutCap,
     mechanismMask,
     dividendEnabled: (mechanismMask & 1) !== 0,
     buybackEnabled: (mechanismMask & 2) !== 0,

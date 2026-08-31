@@ -180,12 +180,18 @@ export const erc20Abi = parseAbi([
  * byte-identical to v1's, so a caller reading launch terms needs no branch.
  */
 export const rallyFactoryV2Abi = parseAbi([
-  "function launch(string name, string symbol, string metadataURI, bytes32 salt, address quote, uint256 initialBuy, (uint16 creatorBps, uint16 dividendBps, uint16 buybackBps, uint16 lpSupportBps) feeConfig, uint8 curvePreset) returns (bytes32 pid, address token)",
+  // Every explicit overload names TWO fee rows (§5.5): the split while the coin is on the
+  // curve, then the split from breakout onward. They are validated against different
+  // creator ceilings — `CREATOR_CAP_BPS` for the curve row, the wider
+  // `BREAKOUT_CREATOR_CAP_BPS` for the other — which is the whole point of there being
+  // two. Pass the same value twice for a launch whose routing should not change when it
+  // breaks out. The 6-arg overload below takes both of the factory's own defaults.
+  "function launch(string name, string symbol, string metadataURI, bytes32 salt, address quote, uint256 initialBuy, (uint16 creatorBps, uint16 dividendBps, uint16 buybackBps, uint16 lpSupportBps) feeConfig, (uint16 creatorBps, uint16 dividendBps, uint16 buybackBps, uint16 lpSupportBps) breakoutFeeConfig, uint8 curvePreset) returns (bytes32 pid, address token)",
   // A shape of the creator's own rather than a preset (§4.5). Gated by
   // `RallyCurveShapes.customAllowed`, and held to the same guards a preset passes: the
   // shape rules, the hook's allocation band, and its opening-depth window.
-  "function launchCustom(string name, string symbol, string metadataURI, bytes32 salt, address quote, uint256 initialBuy, (uint16 creatorBps, uint16 dividendBps, uint16 buybackBps, uint16 lpSupportBps) feeConfig, (uint16 startBps, uint16 endBps, uint16 numPositions, uint16 sharesBps, bool anchorAtFar)[] segments) returns (bytes32 pid, address token)",
-  "function launch(string name, string symbol, string metadataURI, bytes32 salt, address quote, uint256 initialBuy, (uint16 creatorBps, uint16 dividendBps, uint16 buybackBps, uint16 lpSupportBps) feeConfig) returns (bytes32 pid, address token)",
+  "function launchCustom(string name, string symbol, string metadataURI, bytes32 salt, address quote, uint256 initialBuy, (uint16 creatorBps, uint16 dividendBps, uint16 buybackBps, uint16 lpSupportBps) feeConfig, (uint16 creatorBps, uint16 dividendBps, uint16 buybackBps, uint16 lpSupportBps) breakoutFeeConfig, (uint16 startBps, uint16 endBps, uint16 numPositions, uint16 sharesBps, bool anchorAtFar)[] segments) returns (bytes32 pid, address token)",
+  "function launch(string name, string symbol, string metadataURI, bytes32 salt, address quote, uint256 initialBuy, (uint16 creatorBps, uint16 dividendBps, uint16 buybackBps, uint16 lpSupportBps) feeConfig, (uint16 creatorBps, uint16 dividendBps, uint16 buybackBps, uint16 lpSupportBps) breakoutFeeConfig) returns (bytes32 pid, address token)",
   "function launch(string name, string symbol, string metadataURI, bytes32 salt, address quote, uint256 initialBuy) returns (bytes32 pid, address token)",
   "function predictToken(bytes32 salt, string name, string symbol) view returns (address)",
   "function packSalt(address creator, uint96 nonce) pure returns (bytes32)",
@@ -201,6 +207,10 @@ export const rallyFactoryV2Abi = parseAbi([
   "function hook() view returns (address)",
   "function registry() view returns (address)",
   "function defaultFeeConfig() view returns (uint16 creatorBps, uint16 dividendBps, uint16 buybackBps, uint16 lpSupportBps)",
+  // The other half of the default (§5.5). Creator-weighted where `defaultFeeConfig` is
+  // buyback-weighted, and that contrast IS the policy: on the curve a coin is building the
+  // war chest its own breakout spends, and past breakout that job is done.
+  "function defaultBreakoutFeeConfig() view returns (uint16 creatorBps, uint16 dividendBps, uint16 buybackBps, uint16 lpSupportBps)",
   "event QuoteRegistered(address indexed quote)",
   // No `sqrtPriceX96`/`tick`: a v2 first buy fills against REAL liquidity, so the core
   // v4 `Swap` in the same transaction carries both.
@@ -220,24 +230,91 @@ export const rallyFactoryV2Abi = parseAbi([
  *   - `bonded(pid)` became `bondedOf(pid)`, and it is DERIVED rather than accumulated:
  *     the quote the launch's position ladder holds at the current price. Same number,
  *     computed instead of stored, which is why v2 emits `Bonded` only once.
- *   - `launchedAt`/`graduatedAt` fold into `launchOf`, one call instead of two.
+ *   - `launchedAt`/`graduatedAt` fold into `launchOf`, one call instead of two, and the
+ *     second is now `brokeOutAt` — v2 breaks out, it does not graduate (§4.7).
  */
 export const rallyHookV2Abi = parseAbi([
+  // The hook keeps no convenience getters at all. A v4 hook's address encodes its
+  // permissions, so it can never be replaced without abandoning every pool it hosts, which
+  // means it has to fit under EIP-170 permanently: getters are the cheapest thing to give
+  // up, since each drags an ABI encoder in to return data already exposed here. Everything
+  // derivable lives on `rallyLensV2Abi` instead.
+  //
+  // Raw slots, not a typed getter. Returning a `Launch` across the ABI cost the hook 1,352
+  // bytes of runtime — measured — for a read path, against a contract that can never be
+  // redeployed. So the hook publishes storage and the typed shape is rebuilt off-chain;
+  // `RallyLensV2` is that reconstruction, and is what a host should read. These are here
+  // for the lens itself and for anyone reading a field the lens does not expose.
+  "function extsload(bytes32 slot) view returns (bytes32)",
+  "function extsload(bytes32 startSlot, uint256 n) view returns (bytes32[])",
+  "function keyOf(bytes32 pid) view returns ((address currency0, address currency1, uint24 fee, int24 tickSpacing, address hooks))",
+  "function curveFeeBps(bytes32 pid) view returns (uint256)",
+  "function manager() view returns (address)",
+  "function shapes() view returns (address)",
+  // The one-way latch (§4.7). Named `Breakout` rather than v1's `Graduated` because v2
+  // moves no liquidity when it fires: the curve positions stay exactly where they are, and
+  // what changes is the phase, the resting fee, and which sinks are open.
+  "event Breakout(bytes32 indexed pid, uint40 at, uint256 tailSupply, uint256 burned)",
+  // The post-breakout fee row is now the one being applied. Emitted by the first
+  // `pokeFees` to COMPLETE at or after breakout, not by the latch — see
+  // `activeFeeConfigOf` on the lens for why the switch lags by one collection.
+  "event BreakoutSplitArmed(bytes32 indexed pid)",
+  // Writes. There is deliberately no `creatorFees` READ here: v2 has no such getter, and
+  // the claimable balance is `RallyLensV2.quoteFeesOf(pid).creator`. Note that
+  // `claimCreatorFees` pokes first, so a claim can pay MORE than that balance reads right
+  // now: fees sitting uncollected on the positions are realised by the poke.
+  "function claimCreatorFees(bytes32 pid) returns (uint256)",
+  "function pokeFees(bytes32 pid)",
+]);
+
+/**
+ * RallyLensV2 — the v2 read API.
+ *
+ * Deployed alongside the hook and recorded per generation, because it is constructed
+ * against one hook and a coin must be read through ITS generation's lens. It holds
+ * nothing, has no privileges and is not trusted by the hook, so redeploying it costs a
+ * config change and nothing else.
+ *
+ * Not an oracle. `spotPriceWad` and `bondedOf` read live `slot0`, which anyone can move
+ * within a block: read them to display a coin, never to price a trade against.
+ */
+export const rallyLensV2Abi = parseAbi([
   "function phaseOf(bytes32 pid) view returns (uint8)",
   "function bondedOf(bytes32 pid) view returns (uint256)",
   "function gradThreshold(bytes32 pid) view returns (uint256)",
-  "function curveFeeBps(bytes32 pid) view returns (uint256)",
-  "function launchOf(bytes32 pid) view returns (address token, address creator, address quote, uint40 launchedAt, uint40 graduatedAt)",
+  "function launchOf(bytes32 pid) view returns (address token, address creator, address quote, uint40 launchedAt, uint40 brokeOutAt)",
+  // The CURVE-ERA split. Not necessarily the one in force: see `activeFeeConfigOf`.
   "function feeConfigOf(bytes32 pid) view returns ((uint16 creatorBps, uint16 dividendBps, uint16 buybackBps, uint16 lpSupportBps))",
+  // The split from breakout onward, frozen at creation alongside the first and validated
+  // against the wider `BREAKOUT_CREATOR_CAP_BPS` (§5.5).
+  "function breakoutFeeConfigOf(bytes32 pid) view returns ((uint16 creatorBps, uint16 dividendBps, uint16 buybackBps, uint16 lpSupportBps))",
+  // The row the next `pokeFees` will actually apply, and whether the post-breakout row has
+  // taken over yet. Read THIS for "what does this coin pay right now": the switch is NOT
+  // `phase == BREAKOUT ? breakout : curve`. It lags the latch by one collection, because
+  // the window straddling breakout holds fees from both eras and settles under the capped
+  // curve row (§5.4). Showing the post-breakout split from the moment of breakout
+  // misreports the largest window a launch ever collects.
+  "function activeFeeConfigOf(bytes32 pid) view returns ((uint16 creatorBps, uint16 dividendBps, uint16 buybackBps, uint16 lpSupportBps) config, bool armed)",
+  "function feeScheduleOf(bytes32 pid) view returns ((uint16 curveFeeStartBps, uint16 curveFeeEndBps, uint32 curveFeeDecay, uint16 poolFeeBps, uint16 platformBps, uint16 creatorCapBps, uint16 breakoutCreatorCapBps))",
+  "function quoteFeesOf(bytes32 pid) view returns ((uint256 creator, uint256 platform, uint256 dividend, uint256 buyback, uint256 lpSupport))",
+  "function referralPendingOf(bytes32 pid) view returns (uint256)",
   "function curvePresetOf(bytes32 pid) view returns (uint8)",
   "function curveSupplyOf(bytes32 pid) view returns (uint256)",
-  // The tick graduation latches at. A v2 coin's progress is a PRICE question, so this is
+  // The tick breakout latches at. A v2 coin's progress is a PRICE question, so this is
   // what "how far to breakout" measures against alongside the ladder.
-  "function gradTickOf(bytes32 pid) view returns (int24)",
+  "function breakoutTickOf(bytes32 pid) view returns (int24)",
   "function positionsOf(bytes32 pid) view returns ((int24 tickLower, int24 tickUpper, uint128 liquidity, bytes32 salt)[])",
-  "function creatorFees(bytes32 pid) view returns (uint256)",
-  "function referralPendingOf(bytes32 pid) view returns (uint256)",
-  "function claimCreatorFees(bytes32 pid) returns (uint256)",
+  "function supportOf(bytes32 pid) view returns ((int24 tickLower, int24 tickUpper, uint128 liquidity, bytes32 salt))",
+  // Derived, and new in the lens: progress, spot, the graduation price, and FDV. The SDK
+  // computes the first three off the ladder itself (exactly, and with no round trip), so
+  // these are for hosts that would rather ask the chain than carry the math.
+  "function progressBps(bytes32 pid) view returns (uint256)",
+  "function spotPriceWad(bytes32 pid) view returns (uint256)",
+  "function gradPriceWad(bytes32 pid) view returns (uint256)",
+  "function fdvWad(bytes32 pid, uint256 totalSupply) view returns (uint256)",
+  "function flushReadiness(bytes32 pid) view returns (bool ready, int24 refTick, int24 tick, int24 drift)",
+  "function hook() view returns (address)",
+  "function manager() view returns (address)",
 ]);
 
 /**

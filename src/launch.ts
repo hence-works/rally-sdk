@@ -86,11 +86,32 @@ export interface LaunchParams {
   /** Optional fee-exempt creator first buy, in the quote's base units. */
   initialBuy?: bigint;
   /**
-   * The §6.1 split of the post-platform fee remainder. Omit to use the governance
-   * defaults — which the SDK does by calling the 6-arg `launch` overload, so the
-   * default is resolved on-chain rather than guessed here.
+   * The §6.1 split of the post-platform fee remainder, WHILE THE COIN IS ON THE CURVE.
+   * Omit to use the governance defaults — which the SDK does by calling the 6-arg `launch`
+   * overload, so the default is resolved on-chain rather than guessed here.
+   *
+   * On protocol v2 `creatorBps` here is held to `CREATOR_CAP_BPS`, so the curve era
+   * necessarily routes a floor share into the coin's own buyback and LP-support sinks.
+   * See {@link breakoutFees} for the other era.
    */
   fees?: FeeSplit;
+  /**
+   * PROTOCOL v2 ONLY: the same split, from breakout onward (§5.5).
+   *
+   * A v2 launch freezes two rows and they are held to different creator ceilings — the
+   * curve row to `CREATOR_CAP_BPS`, this one to the wider `BREAKOUT_CREATOR_CAP_BPS`. The
+   * asymmetry is the mechanism: while a coin is bonding it is building the war chest its
+   * own breakout spends, and past breakout that subsidy has done its job and the creator
+   * may take the whole post-platform remainder. A coin that never breaks out never reaches
+   * this row.
+   *
+   * Naming either row makes the SDK name both, filling the unnamed one from the factory's
+   * own default FOR THAT ROW — never by copying the row you did name across, since the two
+   * defaults are deliberately different splits. Pass the same value twice for a launch
+   * whose routing should not change when it breaks out. Ignored on v1, which has one row
+   * for a coin's whole life.
+   */
+  breakoutFees?: FeeSplit;
   /**
    * An already-hosted metadata JSON. Mutually exclusive with `metadata`. Must be
    * `https://`, `ipfs://`, or an inline `data:application/json` URI. See
@@ -154,6 +175,8 @@ export interface PreparedLaunch {
   /** `launchFee + initialBuy` — what the creator pays in total, excluding gas. */
   totalCost: bigint;
   fees?: FeeSplit;
+  /** v2 only: the post-breakout row, when one was named. */
+  breakoutFees?: FeeSplit;
   /** How the cost is funded — `"native"` sets `request.value`. */
   fundWith: "native" | "erc20";
   /** Present only when an ERC-20 allowance short of `totalCost` was found. */
@@ -206,15 +229,21 @@ export async function readQuoteConfig(
  * Deliberately not the registry's `DEFAULT_*_BPS`: those are shared with v1 and seed
  * creator-only, and v2's factory carries its own buyback-weighted default instead.
  * Substituting the registry's would quietly reroute a creator's fees.
+ *
+ * `row` picks which of the two the factory holds (§5.5). They are different splits on
+ * purpose — the curve row is buyback-weighted, the post-breakout row creator-weighted —
+ * so substituting one for the other is exactly the silent misrouting this function exists
+ * to avoid.
  */
 async function readV2DefaultFees(
   client: PublicClientLike,
   factory: Address,
+  row: "curve" | "breakout" = "curve",
 ): Promise<FeeSplit> {
   const [creatorBps, dividendBps, buybackBps, lpSupportBps] = await readContract(client, {
     address: factory,
     abi: rallyFactoryV2Abi,
-    functionName: "defaultFeeConfig",
+    functionName: row === "breakout" ? "defaultBreakoutFeeConfig" : "defaultFeeConfig",
   });
   return { creatorBps, dividendBps, buybackBps, lpSupportBps };
 }
@@ -239,7 +268,11 @@ export async function readTokenVanity(
  * user has already waited on a grind and burned a metadata pin. Failing here costs
  * three cached registry reads.
  */
-export function validateFeeSplit(fees: FeeSplit, policy: FeePolicy): void {
+export function validateFeeSplit(
+  fees: FeeSplit,
+  policy: FeePolicy,
+  row: "curve" | "breakout" = "curve",
+): void {
   const sum = fees.creatorBps + fees.dividendBps + fees.buybackBps + fees.lpSupportBps;
   if (sum !== 10_000) {
     throw new RallyError(
@@ -249,11 +282,18 @@ export function validateFeeSplit(fees: FeeSplit, policy: FeePolicy): void {
       { details: { fees, sum } },
     );
   }
-  if (fees.creatorBps > policy.creatorCapBps) {
+  // Each row against its OWN ceiling (§5.5): checking the post-breakout row against the
+  // curve cap would reject splits the chain accepts, which is the more annoying failure of
+  // the two since it costs a grind and a pin to discover. The breakout cap is undefined on
+  // a registry that predates the key, and skipping the check there is correct rather than
+  // lax: this function is an early-failure convenience and the chain enforces regardless.
+  const cap = row === "breakout" ? policy.breakoutCreatorCapBps : policy.creatorCapBps;
+  if (cap !== undefined && fees.creatorBps > cap) {
     throw new RallyError(
       "INVALID_FEE_SPLIT",
-      `creatorBps ${fees.creatorBps} exceeds the governance cap of ${policy.creatorCapBps}.`,
-      { details: { fees, cap: policy.creatorCapBps } },
+      `creatorBps ${fees.creatorBps} exceeds the governance cap of ${cap} for the ` +
+        `${row === "breakout" ? "post-breakout" : "curve-era"} fee row.`,
+      { details: { fees, cap, row } },
     );
   }
   const disabled: string[] = [];
@@ -677,7 +717,11 @@ export async function prepareLaunch(
     );
   }
 
-  if (params.fees) validateFeeSplit(params.fees, await ctx.feePolicy());
+  if (params.fees || params.breakoutFees) {
+    const policy = await ctx.feePolicy();
+    if (params.fees) validateFeeSplit(params.fees, policy, "curve");
+    if (params.breakoutFees) validateFeeSplit(params.breakoutFees, policy, "breakout");
+  }
 
   const initialBuy = params.initialBuy ?? 0n;
   if (initialBuy < 0n) {
@@ -817,45 +861,52 @@ export async function prepareLaunch(
   // factory's own default on-chain rather than a value guessed off a stale read, and
   // omitting a preset defers to flat the same way.
   const base = [name, symbol, metadataURI, salt, quote.address, initialBuy] as const;
+
+  // A v2 launch freezes TWO fee rows (§5.5) and every explicit overload names both, so a
+  // caller who spells out one has to spell out the other. Defaulting the unnamed row to
+  // the factory's own value for THAT row is the only safe fill: they are different splits,
+  // so copying the named row across would silently rewrite whichever the caller left
+  // alone. Read only when actually needed — the 6-arg path below reads neither.
+  const v2Rows = async (): Promise<readonly [FeeSplit, FeeSplit]> => [
+    params.fees ?? (await readV2DefaultFees(client, factory, "curve")),
+    params.breakoutFees ?? (await readV2DefaultFees(client, factory, "breakout")),
+  ];
+
   const data =
     protocolVersion === 2 && params.curveSegments !== undefined
       ? encodeFunctionData({
           abi: rallyFactoryV2Abi,
           functionName: "launchCustom",
-          args: [
-            ...base,
-            // Same reasoning as the preset overload below: naming a shape must not
-            // silently change the split.
-            params.fees ?? (await readV2DefaultFees(client, factory)),
-            params.curveSegments,
-          ],
+          args: [...base, ...(await v2Rows()), params.curveSegments],
         })
       : protocolVersion === 2 && params.curvePreset !== undefined
       ? encodeFunctionData({
           abi: rallyFactoryV2Abi,
           functionName: "launch",
-          args: [
-            ...base,
-            // There is no (base + preset) overload without a split, so choosing a shape
-            // means naming one. Read the factory's own default rather than substituting a
-            // guess: it is not the registry's `DEFAULT_*_BPS` (those are v1's and seed
-            // creator-only), it is v2's buyback-weighted default, and a creator who did
-            // not ask to change their split must not have it changed by picking a curve.
-            params.fees ?? (await readV2DefaultFees(client, factory)),
-            params.curvePreset,
-          ],
+          // There is no (base + preset) overload without the splits, so choosing a shape
+          // means naming them. The defaults come from the factory rather than a guess: they
+          // are not the registry's `DEFAULT_*_BPS` (those are v1's and seed creator-only),
+          // and a creator who did not ask to change their routing must not have it changed
+          // by picking a curve.
+          args: [...base, ...(await v2Rows()), params.curvePreset],
         })
-      : params.fees
+      : protocolVersion === 2 && (params.fees || params.breakoutFees)
         ? encodeFunctionData({
-            abi: factoryAbi,
+            abi: rallyFactoryV2Abi,
             functionName: "launch",
-            args: [...base, params.fees],
+            args: [...base, ...(await v2Rows())],
           })
-        : encodeFunctionData({
-            abi: factoryAbi,
-            functionName: "launch",
-            args: [...base],
-          });
+        : params.fees
+          ? encodeFunctionData({
+              abi: factoryAbi,
+              functionName: "launch",
+              args: [...base, params.fees],
+            })
+          : encodeFunctionData({
+              abi: factoryAbi,
+              functionName: "launch",
+              args: [...base],
+            });
 
   return {
     token,
@@ -870,6 +921,7 @@ export async function prepareLaunch(
     initialBuy,
     totalCost,
     fees: params.fees,
+    breakoutFees: params.breakoutFees,
     fundWith,
     approval,
     request: {

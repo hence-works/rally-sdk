@@ -121,12 +121,19 @@ export function createRallyClient(config: RallyClientConfig) {
 
   // Quote configs are per-quote and rarely change, but they carry the launch fee, so
   // they get the same TTL rather than being cached forever.
+  //
+  // Keyed by FACTORY as well as quote, and `factory` is a parameter for the same reason
+  // `getFeePolicy` takes a registry: the allowlist is per generation, and `B` and the
+  // launch fee on one say nothing about another's. Reading v1's numbers to describe a v2
+  // launch is how a form ends up displaying a graduation threshold the coin will never
+  // use. Defaults to the addresses' own factory, which is right for v1.
   const quoteCache = new Map<string, { at: number; value: Promise<QuoteConfig> }>();
-  function quoteConfig(quote: Address): Promise<QuoteConfig> {
-    const key = quote.toLowerCase();
+  function quoteConfig(quote: Address, factory?: Address): Promise<QuoteConfig> {
+    const from = factory ?? requireFactory(addresses);
+    const key = `${from.toLowerCase()}:${quote.toLowerCase()}`;
     const hit = quoteCache.get(key);
     if (hit && Date.now() - hit.at < ttl) return hit.value;
-    const value = readQuoteConfig(publicClient, requireFactory(addresses), quote, addresses.weth);
+    const value = readQuoteConfig(publicClient, from, quote, addresses.weth);
     quoteCache.set(key, { at: Date.now(), value });
     value.catch(() => quoteCache.delete(key));
     return value;
@@ -216,7 +223,13 @@ export function createRallyClient(config: RallyClientConfig) {
      * registry; same default and override as {getCurveParams}.
      */
     getFeePolicy: (registry?: Address) => feePolicy(registry),
-    /** A quote's allowlist entry, launch fee and graduation threshold. Cached. */
+    /**
+     * A quote's allowlist entry, launch fee and graduation threshold. Cached.
+     *
+     * `factory` selects the generation, as `getFeePolicy`'s `registry` does. Pass a v2
+     * generation's factory to describe a v2 launch: the allowlist, `B` and the launch fee
+     * are per generation, so the default (v1's factory) answers about a different coin.
+     */
     getQuoteConfig: quoteConfig,
     /** The factory's current address-vanity pattern. */
     getTokenVanity: () => readTokenVanity(publicClient, requireFactory(addresses)),
