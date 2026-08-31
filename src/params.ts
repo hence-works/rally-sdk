@@ -67,6 +67,19 @@ export const REGISTRY_KEYS = {
    * bounds a first buy yet, so a host that wants a limit applies its own.
    */
   FIRST_BUY_SUPPLY_CAP_BPS: 19,
+  /**
+   * Ceiling on `creatorBps` in a v2 launch's POST-BREAKOUT fee row (§5.5) — the second of
+   * two rows a v2 launch freezes at creation. `CREATOR_CAP_BPS` above bounds the curve-era
+   * row; this one bounds the row that applies once the coin has broken out, and it is
+   * deliberately the wider of the two: a coin that reached `B` has already funded its own
+   * buyback and LP-support war chest on the way up, so from breakout onward the creator may
+   * take the whole post-platform remainder.
+   *
+   * v2 only, and listed here because the ordinals must mirror the Solidity `Key` enum
+   * exactly. A registry deployed before this key existed REVERTS on it (the ABI decoder
+   * rejects an out-of-range enum) rather than answering 0.
+   */
+  BREAKOUT_CREATOR_CAP_BPS: 20,
 } as const;
 
 export type RegistryKey = (typeof REGISTRY_KEYS)[keyof typeof REGISTRY_KEYS];
