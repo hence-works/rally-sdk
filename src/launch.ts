@@ -618,7 +618,13 @@ export interface PrepareLaunchContext {
    */
   factory: Address;
   account?: Address;
-  feePolicy: () => Promise<FeePolicy>;
+  /**
+   * The governance fee policy, per REGISTRY. Every generation ships its own registry and
+   * governance on one never reaches another, so the caps a split is validated against
+   * have to come from the registry the launch's own factory reads. Omitting the argument
+   * reads the address set's registry, which is v1's.
+   */
+  feePolicy: (registry?: Address) => Promise<FeePolicy>;
   /**
    * Pins metadata and returns the URI; absent when no pinner is configured.
    * `metadata` arrives fully resolved — `name`/`symbol` already defaulted from the
@@ -718,7 +724,14 @@ export async function prepareLaunch(
   }
 
   if (params.fees || params.breakoutFees) {
-    const policy = await ctx.feePolicy();
+    // THIS generation's registry. A v2 launch validated against v1's read another
+    // deployment's caps: the two registries are independent contracts under separate
+    // governance, and v2 additionally has a key v1 does not (`BREAKOUT_CREATOR_CAP_BPS`),
+    // so the breakout row was measured against a ceiling that registry never held.
+    // `RallyFactoryV2._validateFeeConfig` enforces the real caps on chain either way, so
+    // the symptom was a preflight that passed a split the transaction then reverted on
+    // (or rejected one that was legal), not a bad split reaching the hook.
+    const policy = await ctx.feePolicy(generation?.paramRegistry);
     if (params.fees) validateFeeSplit(params.fees, policy, "curve");
     if (params.breakoutFees) validateFeeSplit(params.breakoutFees, policy, "breakout");
   }

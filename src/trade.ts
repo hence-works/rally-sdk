@@ -232,7 +232,10 @@ export async function resolveLaunch(
   addresses: RallyAddresses,
   token: Address,
   candidateQuotes: Address[],
-  quoteConfig: (quote: Address) => Promise<QuoteConfig>,
+  // Takes the FACTORY the config should be read from, because the quote allowlist, `B`
+  // and the launch fee are all per generation. Omitting it reads the addresses' own
+  // factory, which is right for v1 and wrong for a v2 coin: see `resolveLaunchV2`.
+  quoteConfig: (quote: Address, factory?: Address) => Promise<QuoteConfig>,
   generation?: LaunchGeneration,
 ): Promise<LaunchState> {
   const generations = generationsToProbe(addresses, generation);
@@ -365,7 +368,7 @@ async function resolveLaunchV2(args: {
   gen: HookGeneration;
   token: Address;
   quoteAddress: Address;
-  quoteConfig: (quote: Address) => Promise<QuoteConfig>;
+  quoteConfig: (quote: Address, factory?: Address) => Promise<QuoteConfig>;
   key: PoolKey;
   pid: Hex;
   phase: Phase;
@@ -392,7 +395,12 @@ async function resolveLaunchV2(args: {
 
   const [quote, bonded, gradThreshold, info, feeSplit, positions, support, slot0Word, preset] =
     await Promise.all([
-      args.quoteConfig(quoteAddress),
+      // THIS generation's factory, not the addresses' top-level one. The quote allowlist
+      // is per generation, so a quote allowlisted on v2 and not on v1 reads back as
+      // not-allowed with `decimals: 0`, and `scaleFor(0)` then puts every derived price
+      // out by 10^18. Falls back to v1's only when the generation records no factory,
+      // which is the pre-existing behaviour for a manifest that predates the field.
+      args.quoteConfig(quoteAddress, gen.rallyFactory),
       v2("bondedOf"),
       v2("gradThreshold"),
       readContract(client, {

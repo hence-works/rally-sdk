@@ -258,9 +258,21 @@ export function createRallyClient(config: RallyClientConfig) {
 
     // ──────────────────────────── launching ────────────────────────────
 
-    /** Validate a §6.1 fee split against live governance policy. */
-    async validateFees(fees: Parameters<typeof validateFeeSplit>[0]): Promise<void> {
-      validateFeeSplit(fees, await feePolicy());
+    /**
+     * Validate a §6.1 fee split against live governance policy.
+     *
+     * `row` picks the ceiling: the curve row is capped by `CREATOR_CAP_BPS`, the
+     * post-breakout row by the higher `BREAKOUT_CREATOR_CAP_BPS`. `registry` selects the
+     * generation, as `getFeePolicy`'s does; pass a v2 generation's registry to validate a
+     * v2 split, since the default (v1's) is a different contract under separate
+     * governance and does not carry the breakout key at all.
+     */
+    async validateFees(
+      fees: Parameters<typeof validateFeeSplit>[0],
+      row: Parameters<typeof validateFeeSplit>[2] = "curve",
+      registry?: Address,
+    ): Promise<void> {
+      validateFeeSplit(fees, await feePolicy(registry), row);
     },
 
     /**
