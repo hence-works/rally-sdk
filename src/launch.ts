@@ -4,7 +4,7 @@
  *
  * The order is forced by the protocol and cannot be rearranged:
  *
- *   read the quote's fee + B  →  mine a creator-bound vanity salt  →  the token
+ *   read the quote's fee + B  →  mine a creator-bound salt  →  the token
  *   address is now known  →  pin metadata at that address  →  launch(…)
  *
  * The address has to exist before the metadata, because the pin path embeds it; the
@@ -22,9 +22,9 @@ import { readContract } from "viem/actions";
 import { erc20Abi, rallyFactoryAbi, rallyFactoryV2Abi, rallyHookAbi } from "./abis";
 import { currentGeneration } from "./addresses";
 import { RallyError } from "./errors";
-import { mineVanitySalt } from "./mine";
+import { mineSalt } from "./mine-core";
 import { poolIdOf } from "./pool";
-import { packSalt, saltCreator, type Vanity } from "./salt";
+import { packSalt, saltCreator } from "./salt";
 import type {
   CurveSegment,
   FeePolicy,
@@ -136,7 +136,7 @@ export interface LaunchParams {
    * so `onStep` fires around it.
    */
   pin?: PinLaunchMetadata;
-  /** A pre-mined salt. Must be creator-bound and hit the vanity pattern. */
+  /** A pre-mined salt. Must be creator-bound and sort below the quote (I-7). */
   salt?: Hex;
   /**
    * How to fund `launchFee + initialBuy`. `"native"` attaches ETH as `msg.value` and
@@ -246,19 +246,6 @@ async function readV2DefaultFees(
     functionName: row === "breakout" ? "defaultBreakoutFeeConfig" : "defaultFeeConfig",
   });
   return { creatorBps, dividendBps, buybackBps, lpSupportBps };
-}
-
-/** Read the factory's current vanity pattern. */
-export async function readTokenVanity(
-  client: PublicClientLike,
-  factory: Address,
-): Promise<Vanity> {
-  const [prefixLen, suffixLen, prefixBits, suffixBits] = await readContract(client, {
-    address: factory,
-    abi: rallyFactoryAbi,
-    functionName: "tokenVanity",
-  });
-  return { prefixLen, suffixLen, prefixBits, suffixBits };
 }
 
 /**
@@ -772,8 +759,7 @@ export async function prepareLaunch(
 
   // The token's CREATE2 address depends only on (LaunchLib, salt, initCodeHash), so
   // both reads happen once and the grind is pure-local from there.
-  const [vanity, initCodeHash, deployer] = await Promise.all([
-    readTokenVanity(client, factory),
+  const [initCodeHash, deployer] = await Promise.all([
     readContract(client, {
       address: factory,
       abi: factoryAbi,
@@ -781,8 +767,8 @@ export async function prepareLaunch(
       args: [name, symbol],
     }),
     // LaunchLib runs the `new RallyToken{salt}`, so it — not the factory — is the
-    // CREATE2 `from`. Mining against the factory lands a non-vanity address and
-    // reverts VanityMismatch. Read it rather than trusting the bundled manifest.
+    // CREATE2 `from`. Mining against the factory lands a different address entirely and
+    // reverts. Read it rather than trusting the bundled manifest.
     readContract(client, { address: factory, abi: factoryAbi, functionName: "launchLib" }),
   ]);
 
@@ -807,11 +793,14 @@ export async function prepareLaunch(
     });
   } else {
     step("mining");
-    const mined = await mineVanitySalt({
+    const mined = await mineSalt({
       deployer,
       creator,
       initCodeHash,
-      vanity,
+      // I-7. Passing the quote is what makes the mined salt launchable at all: the
+      // predicate lives here, not on the factory, and a salt that misses it reverts
+      // `TokenMustSortBelowQuote`.
+      quote: quoteAddress,
       ...params.mining,
     });
     salt = mined.salt;

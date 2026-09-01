@@ -30,7 +30,7 @@ const rally = createRallyClient({
   walletClient: createWalletClient({ chain: sepolia, transport: custom(window.ethereum) }),
 });
 
-// Launch a coin. Mines the vanity salt, pins nothing (you host the JSON), sends the tx.
+// Launch a coin. Mines the salt, pins nothing (you host the JSON), sends the tx.
 const { token, pid } = await rally.launch({
   name: "Good Dog",
   symbol: "WOOF",
@@ -95,9 +95,8 @@ result.firstBuyTokens;  // what `initialBuy` actually bought, if any
 
 Four things worth knowing, because they constrain the order of operations:
 
-- **The token address is mined, not assigned.** Rally's factory requires the launch
-  token to land on a vanity pattern (`0x1f60…` by default), so the SDK grinds a CREATE2
-  salt first. That salt is *creator-bound* — its high 20 bytes must equal the sending
+- **The token address is mined, not assigned.** A launch token must sort BELOW its quote
+  (so it is always `currency0`), so the SDK grinds a CREATE2 salt first. That salt is *creator-bound* — its high 20 bytes must equal the sending
   account — so the address commits to its creator and can't be front-run off public
   calldata.
 - **Metadata comes after the address, never before.** The URI is frozen onto the token
@@ -173,37 +172,31 @@ around:
   absolute http(s) URL, and socials take a bare handle or a full URL. `validateLaunchMetadataDocument`
   is exported if you want the same check over a document you host elsewhere.
 
-### Vanity mining
+### Salt mining
 
-Mining is pure-local — no RPC per attempt. The default engine is the embedded WASM
-miner (Rust → wasm32, base64-inlined, ~3.5 KB, roughly 2× the JS loop); it falls back
-to a pure-JavaScript loop wherever WASM can't run, such as a CSP that blocks
-`WebAssembly.instantiate`. Both engines hash the same preimage and are pinned to
-produce identical salts in the test suite.
+Mining is pure-local — no RPC per attempt. One small JS loop: the only predicate on a
+launch address is that it sorts below the launch's quote (I-7), which about half of all
+salts satisfy, so it lands in a couple of attempts. An earlier version of this package
+mined a governed address-VANITY pattern instead and shipped an embedded WASM engine for
+it; both are gone. The pattern pinned the same high nibbles the ordering rule governs, so
+a pattern sorting above a quote made every launch on that quote impossible.
 
 ```ts
-import { mineVanitySalt, isWasmMinerAvailable } from "@rally-fun/sdk";
+import { mineSalt } from "@rally-fun/sdk";
 
-const { salt, address, attempts, engine } = await mineVanitySalt({
+const { salt, address, attempts } = await mineSalt({
   deployer: rally.addresses.launchLib,   // the CREATE2 `from` — NOT the factory
   creator: myAddress,
   initCodeHash,
-  vanity: await rally.getTokenVanity(),
+  quote: quoteAddress,                   // REQUIRED: the address must sort below it
   onProgress: (n) => setProgress(n),
   signal: controller.signal,
-  // engine: "wasm" to fail loudly instead of falling back; "js" to force the fallback
 });
 ```
 
-The default 4-nibble pattern is ~65k expected attempts — around 400ms in WASM. Shard
-across workers by giving each a distinct `startNonce` and a `stride` equal to the
+Shard across workers by giving each a distinct `startNonce` and a `stride` equal to the
 worker count; pass a pre-mined `salt` to `prepareLaunch` to skip the grind.
-
----
-
-## Trading
-
-```ts
+s
 const launch = await rally.getLaunch(token);
 // → phase, bonded/gradThreshold, poolPriceWad, reserves, feeSplit, poolKey, pid
 ```
@@ -413,7 +406,6 @@ governance change re-flows on its own. The client caches these for 60s.
 await rally.getCurveParams();   // supply, curve allocation, fee decay, pool fee
 await rally.getFeePolicy();     // platform cut, creator cap, enabled mechanisms
 await rally.listQuotes();       // allowlisted quotes with their fee + B + decimals
-await rally.getTokenVanity();   // the current address pattern
 ```
 
 ## Errors
@@ -455,6 +447,4 @@ yarn workspace @rally-fun/sdk sync:deployments   # regenerate src/deployments.ts
 ```
 
 After any redeploy, run `sync:deployments` and publish a new version — a stale bundled
-address is the one failure an integrator cannot debug from their side. After changing
-the Rust miner, run `packages/vanity-miner/build.sh`, which re-embeds the WASM into both
-this package and the web app from the same build.
+address is the one failure an integrator cannot debug from their side.

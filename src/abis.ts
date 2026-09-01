@@ -12,7 +12,7 @@ import { parseAbi } from "viem";
 
 /**
  * RallyFactory — the launch creation path: `launch`, the quote allowlist, the address
- * vanity constraint, and the salt/predict helpers.
+ * and the salt/predict helpers.
  *
  * `launch` has two overloads. The 7-arg form takes an explicit fee split; the 6-arg
  * form defers to the governance `DEFAULT_*_BPS` on-chain, which is how the SDK avoids
@@ -33,10 +33,8 @@ export const rallyFactoryAbi = parseAbi([
   "function saltCreator(bytes32 salt) pure returns (address)",
   "function tokenInitCodeHash(string name, string symbol) view returns (bytes32)",
   // The token is deployed via CREATE2 by this helper, so LaunchLib — not the factory —
-  // is the CREATE2 `from` that off-chain vanity mining must use.
+  // is the CREATE2 `from` that off-chain salt mining must use.
   "function launchLib() view returns (address)",
-  "function tokenVanity() view returns (uint8 prefixLen, uint8 suffixLen, uint64 prefixBits, uint64 suffixBits)",
-  "function matchesVanity(address a) view returns (bool)",
   // Per-quote config: the launch fee F and graduation threshold B in that quote's own
   // base units, plus its decimals. Governance-tunable — always read, never assume.
   "function quotes(address quote) view returns (bool allowed, uint8 decimals, uint256 gradThreshold, uint256 launchFee, uint256 scale)",
@@ -176,7 +174,7 @@ export const erc20Abi = parseAbi([
  * Two differences an integrator will hit. `launch` gained a `curvePreset` overload (v2
  * launches pick a curve SHAPE, §4.2), and none of the four forms is `payable`: v2 is
  * wETH-only, so a launch never carries native value. The mining helpers, the quote
- * allowlist and the vanity predicate are unchanged, and `quotes(address)` is
+ * allowlist is unchanged, and `quotes(address)` is
  * byte-identical to v1's, so a caller reading launch terms needs no branch.
  */
 export const rallyFactoryV2Abi = parseAbi([
@@ -198,8 +196,6 @@ export const rallyFactoryV2Abi = parseAbi([
   "function saltCreator(bytes32 salt) pure returns (address)",
   "function tokenInitCodeHash(string name, string symbol) view returns (bytes32)",
   "function launchLib() view returns (address)",
-  "function tokenVanity() view returns (uint8 prefixLen, uint8 suffixLen, uint64 prefixBits, uint64 suffixBits)",
-  "function matchesVanity(address a) view returns (bool)",
   "function quotes(address quote) view returns (bool allowed, uint8 decimals, uint256 gradThreshold, uint256 launchFee, uint256 scale)",
   "function allQuotes() view returns (address[])",
   "function quoteCount() view returns (uint256)",

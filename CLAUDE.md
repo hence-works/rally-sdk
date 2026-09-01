@@ -32,12 +32,12 @@ who cannot patch it.
   `fdv(curve, bonded)`. `quoteTrade` already does it right; anything new must match.
 - Fees and thresholds come from `RallyParamRegistry`. `REGISTRY_KEYS` must move in
   lockstep with the Solidity `Key` enum (pinned by `test_keyOrdinalsAreStable`).
-- Vanity mining defaults to the WASM engine (`src/vanity-wasm.ts`, base64 embedded
-  from `packages/vanity-miner`) with a pure-JS fallback. Both engines are pinned to
-  identical output by the test suite. `src/vanity-wasm.ts` is generated: never edit it
-  by hand, regenerate with `packages/vanity-miner/build.sh`, which re-embeds the web
-  and SDK copies from one build.
-- The vanity `from` is the CREATE2 deployer (`LaunchLib`), not the factory. `salt` is
+- Salt mining is one JS loop (`mineSalt`, `src/mine-core.ts`). Exactly one predicate
+  applies to a launch address: it must sort BELOW its quote (I-7), so the token is always
+  `currency0`. That is a coin flip per attempt, hence no WASM engine. `quote` is a
+  REQUIRED option — the miner did not enforce ordering at all before, so a salt could be
+  returned that reverts `TokenMustSortBelowQuote` at `launch`.
+- The mining `from` is the CREATE2 deployer (`LaunchLib`), not the factory. `salt` is
   creator bound: the high 20 bytes must equal `msg.sender`.
 - Every behavior change needs a test. `test/` covers curve math, launch, pool ids,
   salts and WASM/JS parity, and that parity is the guard against a wrong keccak

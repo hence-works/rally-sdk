@@ -9,7 +9,7 @@ import { V4, poolIdFor, poolIdOf, poolKeyFor, sortCurrencies } from "../src/pool
 
 const HOOK: Address = "0x1B8e0c4163E4Db303Fc78E9b35801E8B87e8a888";
 const WETH: Address = "0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14";
-// Sorts below wETH; the vanity prefix makes launch tokens cluster low.
+// Sorts below wETH, which I-7 requires of every launch token.
 const TOKEN: Address = "0xba5e0000000000000000000000000000000000ff";
 
 describe("sortCurrencies", () => {

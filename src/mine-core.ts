@@ -1,25 +1,32 @@
 /**
- * The pure-JavaScript CREATE2 vanity miner — the fallback behind {mineVanitySalt},
- * used wherever the WASM engine can't run (no `WebAssembly`, a CSP that blocks
- * compilation, an instantiation failure).
+ * The CREATE2 salt miner.
  *
- * Pure-local either way: fetch the token init-code hash and the vanity pattern once,
- * then grind salts with no RPC per attempt. The loop hashes into one preallocated
- * 85-byte buffer (`0xff ‖ deployer ‖ salt ‖ initCodeHash`, exactly one keccak block)
- * and tests the digest byte-wise, so an attempt costs a keccak and nothing else — no
- * hex strings, no allocations. At the default 4-nibble pattern (`0x1f60…`) that is
- * ~65k expected attempts: fast enough here, and ~2× faster again in WASM.
+ * A launch token's address is `CREATE2(LaunchLib, salt, initCodeHash)`, and the protocol
+ * puts exactly one predicate on it: **the token must sort strictly below its quote** (I-7),
+ * so the launch token is always `currency0` and the pool price is always quote-per-token.
+ * A salt that misses it reverts `TokenMustSortBelowQuote` at `launch`.
  *
- * Runs anywhere: no worker_threads, no DOM. Callers who want more throughput can
- * shard the space themselves — give each worker a distinct `startNonce` and a
- * `stride` equal to the worker count.
+ * That is the whole search now. It used to also satisfy an address-VANITY pattern, and
+ * removing it changed the shape of this file completely: a 4-nibble prefix cost ~65k
+ * expected attempts and justified an embedded WASM engine beside this one, where ordering
+ * against a normal quote address is a coin flip and lands in about two. The WASM miner and
+ * the engine selection went with it.
+ *
+ * Worse than pointless, the two predicates could contradict each other. Both constrain the
+ * HIGH nibbles of the address, so a pattern sorting above the quote made every launch on
+ * that quote impossible — which is not hypothetical: `0x1f60…` against Robinhood's wETH at
+ * `0x0Bd7…` meant no wETH-quoted v2 coin could ever be created there.
+ *
+ * Pure-local: fetch the init-code hash once, then grind with no RPC per attempt. The loop
+ * hashes into one preallocated 85-byte buffer (`0xff ‖ deployer ‖ salt ‖ initCodeHash`,
+ * exactly one keccak block) and compares the digest's low 20 bytes against the quote
+ * byte-wise, so an attempt costs a keccak and nothing else.
+ *
+ * Runs anywhere: no worker_threads, no DOM.
  */
 import { getAddress, keccak256, type Address, type Hex } from "viem";
 import { RallyError } from "./errors";
-import { compileVanity, packSalt, type Vanity } from "./salt";
-
-/** Which grind implementation to use. */
-export type MineEngine = "auto" | "wasm" | "js";
+import { packSalt } from "./salt";
 
 export interface MineOptions {
   /** CREATE2 deployer (`from`) — the LaunchLib address, NOT the factory. */
@@ -27,7 +34,15 @@ export interface MineOptions {
   /** The launching account the salt (and so the address) is bound to. */
   creator: Address;
   initCodeHash: Hex;
-  vanity: Vanity;
+  /**
+   * The launch's quote. The mined address must sort strictly BELOW it (I-7).
+   *
+   * Required, deliberately. This predicate is the only thing standing between a caller and
+   * a salt that reverts at `launch`, and it was previously absent here entirely — the miner
+   * satisfied a vanity pattern and never checked ordering, so a launch succeeded or failed
+   * on where the address happened to land. Making it optional would restore that.
+   */
+  quote: Address;
   /** First nonce to try. Shard workers by giving each a distinct start. */
   startNonce?: bigint;
   /** Nonce increment per attempt; set to the worker count to shard the space. */
@@ -38,12 +53,6 @@ export interface MineOptions {
   maxAttempts?: number;
   /** Set false to grind synchronously without yielding (backends only — it blocks). */
   yieldBetweenBatches?: boolean;
-  /**
-   * Which engine to grind with. `"auto"` (default) uses the embedded WASM miner and
-   * falls back to the JS loop if it can't be instantiated; `"js"` forces the fallback;
-   * `"wasm"` throws instead of falling back.
-   */
-  engine?: MineEngine;
   onProgress?: (attempts: number) => void;
   signal?: AbortSignal;
 }
@@ -71,29 +80,18 @@ export function hexToBytes(hex: string, expectedLength: number): Uint8Array {
 }
 
 /**
- * Grind creator-bound salts in pure JS until the token address matches `vanity`.
+ * Grind creator-bound salts until the predicted token address sorts below `quote`.
  *
  * Throws `MINING_FAILED` when aborted or when `maxAttempts` is exhausted, rather than
- * returning a salt that would revert `VanityMismatch` on-chain.
+ * returning a salt that would revert `TokenMustSortBelowQuote` on-chain.
  */
-export async function mineVanitySaltJs(opts: MineOptions): Promise<MineResult> {
-  const { deployer, creator, initCodeHash, vanity } = opts;
+export async function mineSalt(opts: MineOptions): Promise<MineResult> {
+  const { deployer, creator, initCodeHash, quote } = opts;
   const stride = opts.stride ?? 1n;
   const batchSize = opts.batchSize ?? 20_000;
-  const maxAttempts = opts.maxAttempts ?? 50_000_000;
+  const maxAttempts = opts.maxAttempts ?? 1_000_000;
   const shouldYield = opts.yieldBetweenBatches ?? true;
-  const compiled = compileVanity(vanity);
   const start = opts.startNonce ?? 0n;
-
-  // Nothing pinned → any salt works.
-  if (compiled.empty) {
-    const salt = packSalt(creator, start);
-    return {
-      salt,
-      address: create2Address(deployer, salt, initCodeHash),
-      attempts: 0,
-    };
-  }
 
   // preimage = 0xff ‖ deployer(20) ‖ salt(32) ‖ initCodeHash(32) = 85 bytes.
   // The salt's high 20 bytes are the creator and never change; only the 12-byte
@@ -104,6 +102,10 @@ export async function mineVanitySaltJs(opts: MineOptions): Promise<MineResult> {
   buf.set(hexToBytes(creator, 20), 21);
   buf.set(hexToBytes(initCodeHash, 32), 53);
   const view = new DataView(buf.buffer);
+
+  // Compared byte-wise against the digest's low 20 bytes rather than as a BigInt: the
+  // hot path should not allocate, and address ordering is plain big-endian byte order.
+  const quoteBytes = hexToBytes(quote, 20);
 
   // Split the 96-bit nonce so the inner loop only touches Numbers: `hi` is the top
   // 48 bits (rewritten on overflow), `lo` the bottom 48, which fit exactly in a
@@ -122,7 +124,6 @@ export async function mineVanitySaltJs(opts: MineOptions): Promise<MineResult> {
   };
   writeHi();
 
-  const { checks } = compiled;
   let attempts = 0;
 
   for (;;) {
@@ -131,22 +132,24 @@ export async function mineVanitySaltJs(opts: MineOptions): Promise<MineResult> {
       view.setUint32(49, lo % 4294967296);
 
       const digest = keccak256(buf, "bytes");
-      let hit = true;
-      for (let c = 0; c < checks.length; c++) {
-        const check = checks[c]!;
-        // The address is the digest's low 20 bytes, i.e. offset 12.
-        if ((digest[12 + check.index]! & check.mask) !== check.expected) {
-          hit = false;
+      // The address is the digest's low 20 bytes, i.e. offset 12. Strictly below the
+      // quote: equal is a revert too, and equality here would mean the launch token IS
+      // the quote, which nothing downstream could make sense of.
+      let hit = false;
+      for (let b = 0; b < 20; b++) {
+        const a = digest[12 + b]!;
+        const q = quoteBytes[b]!;
+        if (a !== q) {
+          hit = a < q;
           break;
         }
       }
       if (hit) {
         const nonce = (hi << 48n) | BigInt(lo);
-        const salt = packSalt(creator, nonce);
         return {
-          salt,
-          // EIP-55 checksummed, so an address from either engine compares equal to one
-          // from viem or from `predictToken`.
+          salt: packSalt(creator, nonce),
+          // EIP-55 checksummed, so an address from here compares equal to one from viem
+          // or from `predictToken`.
           address: getAddress(`0x${bytesToHex(digest.subarray(12))}`),
           attempts: attempts + i + 1,
         };
@@ -163,14 +166,15 @@ export async function mineVanitySaltJs(opts: MineOptions): Promise<MineResult> {
     attempts += batchSize;
     opts.onProgress?.(attempts);
     if (opts.signal?.aborted) {
-      throw new RallyError("MINING_FAILED", "Vanity mining aborted.", { details: { attempts } });
+      throw new RallyError("MINING_FAILED", "Salt mining aborted.", { details: { attempts } });
     }
     if (attempts >= maxAttempts) {
       throw new RallyError(
         "MINING_FAILED",
-        `No vanity salt found in ${attempts} attempts. Raise maxAttempts, or check the ` +
-          `factory's tokenVanity() pattern is satisfiable.`,
-        { details: { attempts, vanity } },
+        `No salt found in ${attempts} attempts whose address sorts below ${quote}. About ` +
+          `half of all salts should qualify, so this many misses means the quote address ` +
+          `is pathologically low, not that you were unlucky.`,
+        { details: { attempts, quote } },
       );
     }
     // Yield so a UI thread stays live and a Node event loop keeps serving I/O.

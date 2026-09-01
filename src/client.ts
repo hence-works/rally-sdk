@@ -24,7 +24,6 @@ import {
   parseLaunchReceipt,
   prepareLaunch as prepareLaunchInner,
   readQuoteConfig,
-  readTokenVanity,
   validateFeeSplit,
   type LaunchParams,
   type LaunchResult,
@@ -231,8 +230,6 @@ export function createRallyClient(config: RallyClientConfig) {
      * are per generation, so the default (v1's factory) answers about a different coin.
      */
     getQuoteConfig: quoteConfig,
-    /** The factory's current address-vanity pattern. */
-    getTokenVanity: () => readTokenVanity(publicClient, requireFactory(addresses)),
 
     /** Every quote this client will consider, resolved. */
     async listQuotes(): Promise<QuoteConfig[]> {
@@ -276,7 +273,7 @@ export function createRallyClient(config: RallyClientConfig) {
     },
 
     /**
-     * Resolve a launch end to end — quote economics, vanity salt, token address,
+     * Resolve a launch end to end — quote economics, salt, token address,
      * metadata — and return the unsigned transaction(s). Sends nothing.
      */
     prepareLaunch(params: LaunchParams): Promise<PreparedLaunch> {

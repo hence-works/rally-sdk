@@ -21,7 +21,7 @@ export interface RallyAddresses {
   usdc: Address;
   poolManager: Address;
   paramRegistry: Address;
-  /** CREATE2 deployer of launch tokens — the `from` vanity mining must use. */
+  /** CREATE2 deployer of launch tokens — the `from` salt mining must use. */
   launchLib: Address;
   launchHook: Address;
   /** Absent on chains deployed before the creation path split out of the hook. */
@@ -150,7 +150,7 @@ export interface LegacyDeployment {
    */
   paramRegistry?: Address;
   /**
-   * That generation's CREATE2 token deployer, the vanity `from` for its coins. Same
+   * That generation's CREATE2 token deployer, the mining `from` for its coins. Same
    * optionality and fallback as `paramRegistry`.
    */
   launchLib?: Address;

@@ -87,25 +87,8 @@ export {
 } from "./clmm";
 export type { CurvePricePoint, LadderPosition, SwapResult } from "./clmm";
 
-// Salts & vanity mining
-export {
-  compileVanity,
-  computeTokenAddress,
-  formatVanity,
-  matchesVanity,
-  packSalt,
-  saltCreator,
-  vanityDifficulty,
-} from "./salt";
-export type { CompiledVanity, Vanity } from "./salt";
-export {
-  isWasmMinerAvailable,
-  loadVanityWasm,
-  mineVanitySalt,
-  mineVanitySaltJs,
-  mineVanitySaltWasm,
-} from "./mine";
-export type { MineEngine, MineOptions, MineOutcome, MineResult } from "./mine";
+// Salts mining
+export { computeTokenAddress, packSalt, saltCreator } from "./salt";
 
 // Curve math — the on-chain bonding curve, ported exactly.
 export {
@@ -129,7 +112,12 @@ export {
   tokensInForSell,
   tokensOutForBuy,
 } from "./curve";
-export type { Curve, CurveCostPreview, CurveFeeParams, CurvePreview } from "./curve";
+export type {
+  Curve,
+  CurveCostPreview,
+  CurveFeeParams,
+  CurvePreview,
+} from "./curve";
 
 // Protocol v2 curve shapes: the preset table, and validating a shape of your own. The
 // shape is frozen at launch, so these are the reads a host shows a creator BEFORE they
@@ -144,7 +132,13 @@ export {
 export type { CurvePresetKey } from "./shapes";
 
 // Governance params
-export { REGISTRY_KEYS, readCurveParams, readFeePolicy, readParam, readParams } from "./params";
+export {
+  REGISTRY_KEYS,
+  readCurveParams,
+  readFeePolicy,
+  readParam,
+  readParams,
+} from "./params";
 export type { RegistryKey } from "./params";
 
 // Launching
@@ -152,12 +146,16 @@ export {
   parseLaunchReceipt,
   prepareLaunch,
   readQuoteConfig,
-  readTokenVanity,
   validateFeeSplit,
   validateLaunchMetadataDocument,
   validateMetadataURI,
 } from "./launch";
-export type { LaunchParams, LaunchResult, PinLaunchMetadata, PreparedLaunch } from "./launch";
+export type {
+  LaunchParams,
+  LaunchResult,
+  PinLaunchMetadata,
+  PreparedLaunch,
+} from "./launch";
 
 // Trading
 export {
