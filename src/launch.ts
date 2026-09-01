@@ -751,19 +751,16 @@ export async function prepareLaunch(
   // salt grind (so an over-cap buy costs no mining time), and report the limit on
   // `PreparedLaunch` so a creator can see what they were measured against.
   const totalCost = quote.launchFee + initialBuy;
-  // v2 is wETH-only and none of its `launch` overloads is payable, so a launch never
-  // carries native value there: the creator holds wETH and approves it. Defaulting a v2
-  // launch to "native" the way v1 does would build a transaction that reverts on send.
-  const fundWith =
-    params.fundWith ?? (quote.isNative && protocolVersion === 1 ? "native" : "erc20");
-  if (fundWith === "native" && protocolVersion === 2) {
-    throw new RallyError(
-      "INVALID_AMOUNT",
-      "Protocol v2 launches cannot be funded with native ETH: `RallyFactoryV2.launch` is " +
-        "not payable. Wrap to wETH and use `fundWith: \"erc20\"`.",
-      { details: { chainId: addresses.chainId } },
-    );
-  }
+  // Both protocols take native ETH on a wETH-quoted launch, so both default to it: the
+  // factory wraps `msg.value` and pays the launch fee and the first buy out of it, which
+  // is one transaction instead of wrap, approve, launch.
+  //
+  // v2 did NOT always do this. Its factory took both legs with `safeTransferFrom` and was
+  // not payable, so an SDK version older than the payable factory refused this path
+  // outright. If a v2 launch reverts here with no revert reason, check that the chain's
+  // `RallyFactoryV2` is the payable one: `hook.factory()` is the address that matters, not
+  // whatever a stale manifest names.
+  const fundWith = params.fundWith ?? (quote.isNative ? "native" : "erc20");
   if (fundWith === "native" && !quote.isNative) {
     throw new RallyError(
       "INVALID_AMOUNT",

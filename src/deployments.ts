@@ -31,6 +31,20 @@ export const DEPLOYMENTS: Record<number, RallyAddresses> = {
         deploymentBlock: 34719118,
       },
     ],
+    v2Deployments: [
+      {
+        launchHook: "0xA460135240c99A903Ab2e259FF1Bde955CA9E8CC",
+        rallyFactory: "0xE6AA8B8dE062f0C97C1F6b40ABc4F7d79e1eF921",
+        rallyRouter: "0x2C04785f3534adBA975AEd1f5443330AEC1CDbE7",
+        paramRegistry: "0xfBAc851B1d760C80Fd9F1a8C7a39b39c9d3d7A73",
+        launchLib: "0x6B3D13400105e7C8364D8A837d362425fcF04A86",
+        curveShapes: "0xC8ba00a0b3ad33909078b07A71BEcFD7905a02eA",
+        lens: "0x99c4eDea9bB26c201B299a88486A05134b77e445",
+        rallyVault: "0xe5B4f8cb7Eb43d442615C34bC968721Eb607FC7F",
+        dividendDistributor: "0xDa34072c9940e06fA354a01Fc92008bD9477e4b8",
+        deploymentBlock: 51782378,
+      },
+    ],
   },
   11155111: {
     chainId: 11155111,
@@ -47,6 +61,18 @@ export const DEPLOYMENTS: Record<number, RallyAddresses> = {
     rallyVault: "0x5bd485A3059D459eA6D6DFd49fE7a2Ff2Af67C11",
     gachaVault: "0x937a1EDBff87165850F848F9F377D1Aa4611ba91",
     v2Deployments: [
+      {
+        launchHook: "0x3d1735B2EaFeF998F1DEC8d69E91a44CE2a228cc",
+        rallyFactory: "0x32932A0FfC31e630348BE19259B6904Bd0Bb1f02",
+        rallyRouter: "0x98C672C01d820e144D935505A1F36264897C95Af",
+        paramRegistry: "0xAeC8EFc9d227ba9F3736142DdE9765ac2F6E0CF5",
+        launchLib: "0x8BC20d29358a1A6849F81A7f437D8291f40f7BfF",
+        curveShapes: "0x052b2755EB6f38134dDf94f03260d2a9dA17D7B4",
+        lens: "0x839750374E58C9a946aA5c9411b539D88B558d62",
+        rallyVault: "0x5218dA5e9a573C27864bb9a993533EDfC942CA83",
+        dividendDistributor: "0x16e1e74634dFd7f1849705933BE2f3dc78404772",
+        deploymentBlock: 11612167,
+      },
       {
         launchHook: "0x9C9482EFc2e958383aAA6285c96970E6E47428CC",
         rallyFactory: "0xE046A424a4A60fC20247D5a3Ed1A083f0b112313",

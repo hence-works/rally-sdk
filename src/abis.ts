@@ -186,13 +186,13 @@ export const rallyFactoryV2Abi = parseAbi([
   // `BREAKOUT_CREATOR_CAP_BPS` for the other — which is the whole point of there being
   // two. Pass the same value twice for a launch whose routing should not change when it
   // breaks out. The 6-arg overload below takes both of the factory's own defaults.
-  "function launch(string name, string symbol, string metadataURI, bytes32 salt, address quote, uint256 initialBuy, (uint16 creatorBps, uint16 dividendBps, uint16 buybackBps, uint16 lpSupportBps) feeConfig, (uint16 creatorBps, uint16 dividendBps, uint16 buybackBps, uint16 lpSupportBps) breakoutFeeConfig, uint8 curvePreset) returns (bytes32 pid, address token)",
+  "function launch(string name, string symbol, string metadataURI, bytes32 salt, address quote, uint256 initialBuy, (uint16 creatorBps, uint16 dividendBps, uint16 buybackBps, uint16 lpSupportBps) feeConfig, (uint16 creatorBps, uint16 dividendBps, uint16 buybackBps, uint16 lpSupportBps) breakoutFeeConfig, uint8 curvePreset) payable returns (bytes32 pid, address token)",
   // A shape of the creator's own rather than a preset (§4.5). Gated by
   // `RallyCurveShapes.customAllowed`, and held to the same guards a preset passes: the
   // shape rules, the hook's allocation band, and its opening-depth window.
-  "function launchCustom(string name, string symbol, string metadataURI, bytes32 salt, address quote, uint256 initialBuy, (uint16 creatorBps, uint16 dividendBps, uint16 buybackBps, uint16 lpSupportBps) feeConfig, (uint16 creatorBps, uint16 dividendBps, uint16 buybackBps, uint16 lpSupportBps) breakoutFeeConfig, (uint16 startBps, uint16 endBps, uint16 numPositions, uint16 sharesBps, bool anchorAtFar)[] segments) returns (bytes32 pid, address token)",
-  "function launch(string name, string symbol, string metadataURI, bytes32 salt, address quote, uint256 initialBuy, (uint16 creatorBps, uint16 dividendBps, uint16 buybackBps, uint16 lpSupportBps) feeConfig, (uint16 creatorBps, uint16 dividendBps, uint16 buybackBps, uint16 lpSupportBps) breakoutFeeConfig) returns (bytes32 pid, address token)",
-  "function launch(string name, string symbol, string metadataURI, bytes32 salt, address quote, uint256 initialBuy) returns (bytes32 pid, address token)",
+  "function launchCustom(string name, string symbol, string metadataURI, bytes32 salt, address quote, uint256 initialBuy, (uint16 creatorBps, uint16 dividendBps, uint16 buybackBps, uint16 lpSupportBps) feeConfig, (uint16 creatorBps, uint16 dividendBps, uint16 buybackBps, uint16 lpSupportBps) breakoutFeeConfig, (uint16 startBps, uint16 endBps, uint16 numPositions, uint16 sharesBps, bool anchorAtFar)[] segments) payable returns (bytes32 pid, address token)",
+  "function launch(string name, string symbol, string metadataURI, bytes32 salt, address quote, uint256 initialBuy, (uint16 creatorBps, uint16 dividendBps, uint16 buybackBps, uint16 lpSupportBps) feeConfig, (uint16 creatorBps, uint16 dividendBps, uint16 buybackBps, uint16 lpSupportBps) breakoutFeeConfig) payable returns (bytes32 pid, address token)",
+  "function launch(string name, string symbol, string metadataURI, bytes32 salt, address quote, uint256 initialBuy) payable returns (bytes32 pid, address token)",
   "function predictToken(bytes32 salt, string name, string symbol) view returns (address)",
   "function packSalt(address creator, uint96 nonce) pure returns (bytes32)",
   "function saltCreator(bytes32 salt) pure returns (address)",
