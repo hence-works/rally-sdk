@@ -239,6 +239,14 @@ export const rallyFactoryU4Abi = parseAbi([
  *     second is now `brokeOutAt` — v2 breaks out, it does not graduate (§4.7).
  */
 export const rallyHookU4Abi = parseAbi([
+  // §6.2 referrals, and NOT the shape v1 uses. v1 pools a referrer's earnings per QUOTE
+  // asset (`referralFeesOwed(referrer, quote)` / `claimReferralFees(quote)`); this
+  // generation accrues them per POOL, so both the read and the claim are keyed by `pid`.
+  // Calling the v1 pair against a u4 hook does not return zero, it reverts
+  // `UnknownSelector` through the fee-facet fallback, because those selectors exist on
+  // neither the hook nor the facet.
+  "function referralOwed(bytes32 pid, address referrer) view returns (uint256)",
+  "function claimReferralFees(bytes32 pid) returns (uint256 amount)",
   // The hook keeps no convenience getters at all. A v4 hook's address encodes its
   // permissions, so it can never be replaced without abandoning every pool it hosts, which
   // means it has to fit under EIP-170 permanently: getters are the cheapest thing to give

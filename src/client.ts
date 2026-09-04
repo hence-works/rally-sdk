@@ -36,7 +36,10 @@ import {
   prepareEthBuy as prepareEthBuyInner,
   prepareSwap as prepareSwapInner,
   prepareSwapExactOut as prepareSwapExactOutInner,
+  chainNowSeconds,
   readReferralFees as readReferralFeesInner,
+  readReferralOwed as readReferralOwedInner,
+  prepareClaimReferralOwed as prepareClaimReferralOwedInner,
   quoteTrade as quoteTradeInner,
   quoteTradeExactOut as quoteTradeExactOutInner,
   resolveLaunch,
@@ -387,7 +390,11 @@ export function createRallyClient(config: RallyClientConfig) {
     ): Promise<TradeQuote> {
       const launch = await this.getLaunch(token, generation);
       const params = await curveParams(launch.paramRegistry);
-      return quoteTradeInner(launch, params, input);
+      // Chain time, matching what `prepareSwap` prices against. Quoting off the caller's
+      // clock here would show one fee in the UI and build the transaction against another,
+      // and the gap is widest right after a launch when the decay is moving fastest.
+      const atTime = input.atTime ?? (await chainNowSeconds(publicClient));
+      return quoteTradeInner(launch, params, { ...input, atTime });
     },
 
     /** Price an exact-output trade: exact on the curve, a reserve-inverted estimate
@@ -399,7 +406,9 @@ export function createRallyClient(config: RallyClientConfig) {
     ): Promise<TradeQuoteExactOut> {
       const launch = await this.getLaunch(token, generation);
       const params = await curveParams(launch.paramRegistry);
-      return quoteTradeExactOutInner(launch, params, input);
+      // Chain time, for the same reason as {quote}.
+      const atTime = input.atTime ?? (await chainNowSeconds(publicClient));
+      return quoteTradeExactOutInner(launch, params, { ...input, atTime });
     },
 
     /**
@@ -563,6 +572,50 @@ export function createRallyClient(config: RallyClientConfig) {
       requireWallet();
       const amount = await this.referralFees(quote, undefined, hook);
       const { hash, receipt } = await send(this.prepareClaimReferralFees(quote, hook));
+      return { hash, receipt, amount };
+    },
+
+    /**
+     * Referral balance on ONE COIN, for the generation that coin actually runs on.
+     *
+     * Prefer this to {referralFees} unless you know the coin is protocol v1. The two
+     * generations key referrals differently — v1 pools them per quote asset, v2 per pool —
+     * and the v1 pair does not degrade gracefully on a v2 coin: `referralFeesOwed` is a
+     * selector on neither its hook nor its fee facet, so the read reverts `UnknownSelector`
+     * rather than returning zero.
+     */
+    async referralFeesFor(token: Address, referrer?: Address, generation?: LaunchGeneration): Promise<bigint> {
+      const who = referrer ?? account();
+      if (!who) {
+        throw new RallyError(
+          "NO_ACCOUNT",
+          "Pass `referrer` (or configure a walletClient) so there is an address to read a " +
+            "referral balance for.",
+        );
+      }
+      const launch = await this.getLaunch(token, generation);
+      return launch.protocolVersion === 2
+        ? readReferralOwedInner(publicClient, launch.pid, who, launch.hook)
+        : readReferralFeesInner(publicClient, addresses, who, launch.quote.address, launch.hook);
+    },
+
+    /** Unsigned referral claim for ONE COIN, in that coin's generation's shape. */
+    async prepareClaimReferralFeesFor(token: Address, generation?: LaunchGeneration): Promise<TxRequest> {
+      const launch = await this.getLaunch(token, generation);
+      return launch.protocolVersion === 2
+        ? prepareClaimReferralOwedInner(addresses, launch.pid, launch.hook)
+        : prepareClaimReferralFeesInner(addresses, launch.quote.address, launch.hook);
+    },
+
+    /**
+     * Claim one coin's referral balance to the wallet's own account. Reports the balance as
+     * it stood before sending, so treat it as a floor: trades landing in between are paid
+     * out but not counted here.
+     */
+    async claimReferralFeesFor(token: Address, generation?: LaunchGeneration) {
+      requireWallet();
+      const amount = await this.referralFeesFor(token, undefined, generation);
+      const { hash, receipt } = await send(await this.prepareClaimReferralFeesFor(token, generation));
       return { hash, receipt, amount };
     },
 

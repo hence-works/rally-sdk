@@ -25,6 +25,7 @@ import {
   erc20Abi,
   poolManagerAbi,
   rallyHookAbi,
+  rallyHookU4Abi,
   rallyLensU4Abi,
   rallyRouterAbi,
   uniswapV3PoolAbi,
@@ -138,6 +139,16 @@ export async function chainDeadline(
   }
 }
 
+/**
+ * A caller's explicit deadline, else `deadlineSeconds` ahead of an ALREADY-READ chain
+ * timestamp. Takes `now` rather than fetching, so the deadline and the fee that priced the
+ * same trade are dated from one block instead of two heads read moments apart.
+ */
+function deadlineFrom(now: number, input: {deadline?: bigint; deadlineSeconds?: number}): bigint {
+  if (input.deadline !== undefined) return input.deadline;
+  return BigInt(now + (input.deadlineSeconds ?? DEFAULT_DEADLINE_SECONDS));
+}
+
 /** A caller's explicit deadline, else `deadlineSeconds` ahead of chain time. */
 function resolveDeadline(
   client: PublicClientLike,
@@ -145,6 +156,31 @@ function resolveDeadline(
 ): Promise<bigint> {
   if (input.deadline !== undefined) return Promise.resolve(input.deadline);
   return chainDeadline(client, input.deadlineSeconds);
+}
+
+/**
+ * CHAIN time, in seconds, for everything a swap has to agree with `block.timestamp` on.
+ *
+ * TWO things depend on it and they must not disagree. The router compares `deadline`
+ * against `block.timestamp`, and the hook prices the anti-snipe decay off the same clock,
+ * so a quote and the transaction built from it have to be dated from one block. Reading
+ * the head twice can straddle a block and date them from two.
+ *
+ * The fee is the one that fails quietly. A deadline computed wrong reverts loudly; a fee
+ * computed wrong comes back as a plausible number, and `amountOut`, `feeQuote` and the
+ * `minAmountOut` the trade is protected by are all derived from it. The gap is widest
+ * exactly where it matters most, right after a launch when the fee is moving fastest.
+ *
+ * Falls back to the local clock when the head cannot be read, so a node that will not
+ * serve a block header does not stop a trade being built. Never rejects.
+ */
+export async function chainNowSeconds(client: PublicClientLike): Promise<number> {
+  try {
+    const block = await getBlock(client, { blockTag: "latest" });
+    return Number(block.timestamp);
+  } catch {
+    return Math.floor(Date.now() / 1000);
+  }
 }
 
 /**
@@ -978,7 +1014,15 @@ export async function prepareSwap(
   params: CurveParams,
   input: PrepareSwapParams,
 ): Promise<PreparedSwap> {
-  const quote = quoteTrade(launch, params, input);
+  // ONE read of chain time, shared by the fee and the deadline below, so the trade cannot
+  // be priced at one block and bounded from another.
+  //
+  // `atTime` overrides the FEE only. The deadline is what the router checks against
+  // `block.timestamp`, so it tracks the chain even when a caller is pricing a hypothetical
+  // moment: letting `atTime` move it would build a transaction that reverts
+  // `DeadlineExpired` the instant anyone quoted a time in the past.
+  const chainNow = await chainNowSeconds(client);
+  const quote = quoteTrade(launch, params, { ...input, atTime: input.atTime ?? chainNow });
   const buy = input.side === "buy";
   const inputToken = buy ? launch.quote.address : launch.token;
   const payWithEth = Boolean(input.payWithEth) && buy && launch.quote.isNative;
@@ -1007,11 +1051,6 @@ export async function prepareSwap(
       { details: { amountIn: input.amountIn, amountOut: quote.amountOut } },
     );
   }
-
-  // Started here rather than awaited in place: it is a second round trip, and there is
-  // no reason to pay for it after the allowance read instead of alongside it.
-  // `resolveDeadline` never rejects, so it is safe to leave floating until it is used.
-  const deadlinePending = resolveDeadline(client, input);
 
   let approval: TxRequest | undefined;
   if (!payWithEth) {
@@ -1045,7 +1084,7 @@ export async function prepareSwap(
   // Buys spend the quote, sells spend the token — direction follows from which side
   // the quote sorted onto.
   const zeroForOne = buy ? launch.quoteIsCurrency0 : !launch.quoteIsCurrency0;
-  const deadline = await deadlinePending;
+  const deadline = deadlineFrom(chainNow, input);
 
   const data = encodeFunctionData({
     abi: rallyRouterAbi,
@@ -1157,7 +1196,10 @@ export async function prepareSwapExactOut(
 
   // Throws NO_PRICE on a graduated launch whose reserves are missing, and
   // INVALID_AMOUNT on an output no reserve can pay, before anything is built.
-  const quote = quoteTradeExactOut(launch, params, input);
+  // One read of chain time, shared with the deadline below. `atTime` overrides the fee
+  // only, never the deadline. See {prepareSwap}.
+  const chainNow = await chainNowSeconds(client);
+  const quote = quoteTradeExactOut(launch, params, { ...input, atTime: input.atTime ?? chainNow });
 
   const buy = input.side === "buy";
   const inputToken = buy ? launch.quote.address : launch.token;
@@ -1186,9 +1228,6 @@ export async function prepareSwapExactOut(
       { details: { maxAmountIn, amountIn: quote.amountIn } },
     );
   }
-
-  // Overlapped with the allowance read below. See the note in {prepareSwap}.
-  const deadlinePending = resolveDeadline(client, input);
 
   let approval: TxRequest | undefined;
   if (!payWithEth) {
@@ -1223,7 +1262,7 @@ export async function prepareSwapExactOut(
   // the quote sorted onto. Identical to the exact-input path: the sign of
   // `amountSpecified` chooses exact-in vs exact-out, `zeroForOne` chooses the leg.
   const zeroForOne = buy ? launch.quoteIsCurrency0 : !launch.quoteIsCurrency0;
-  const deadline = await deadlinePending;
+  const deadline = deadlineFrom(chainNow, input);
 
   const data = encodeFunctionData({
     abi: rallyRouterAbi,
@@ -1487,6 +1526,55 @@ export function prepareClaimReferralFees(
       abi: rallyHookAbi,
       functionName: "claimReferralFees",
       args: [quote],
+    }),
+    value: 0n,
+    chainId: addresses.chainId,
+  };
+}
+
+/**
+ * Referral balance on a PROTOCOL v2 coin, which keys referrals by pool rather than by
+ * quote asset.
+ *
+ * {readReferralFees} is v1's shape and cannot stand in for this: `referralFeesOwed` is not
+ * a selector on a v2 hook OR on its fee facet, so the call reverts `UnknownSelector`
+ * through the fallback rather than answering zero. The two generations are genuinely
+ * different rails, not one rail with two spellings, so a venue earning on both reads each
+ * with its own function.
+ *
+ * Per pool means per coin: a venue that referred trades on twenty coins has twenty
+ * balances and claims each one.
+ */
+export function readReferralOwed(
+  client: PublicClientLike,
+  pid: Hex,
+  referrer: Address,
+  hook: Address,
+): Promise<bigint> {
+  return readContract(client, {
+    address: hook,
+    abi: rallyHookU4Abi,
+    functionName: "referralOwed",
+    args: [pid, referrer],
+  });
+}
+
+/**
+ * Unsigned `claimReferralFees(pid)` for a PROTOCOL v2 coin. Pays the whole balance to
+ * whoever signs it, exactly like v1's: the hook credits `msg.sender`, so the signer must
+ * be the address that was named as referrer.
+ */
+export function prepareClaimReferralOwed(
+  addresses: RallyAddresses,
+  pid: Hex,
+  hook: Address,
+): TxRequest {
+  return {
+    to: hook,
+    data: encodeFunctionData({
+      abi: rallyHookU4Abi,
+      functionName: "claimReferralFees",
+      args: [pid],
     }),
     value: 0n,
     chainId: addresses.chainId,
