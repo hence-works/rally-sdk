@@ -374,6 +374,72 @@ export const uniswapV3PoolAbi = parseAbi([
   "function token0() view returns (address)",
   "function token1() view returns (address)",
   "function fee() view returns (uint24)",
+  // Depth, for choosing between fee tiers when a venue's coin has a pool on more than one.
+  "function liquidity() view returns (uint128)",
+]);
+
+/**
+ * RallyUniversalRouter: the entrypoint for coins launched on a THIRD-PARTY launchpad we
+ * list. Rally's own coins go through `rallyRouterAbi` above and must NOT come here: this
+ * router charges its own route fee on top of the hook fee and sends no `hookData`, so a
+ * Rally coin routed through it would double charge the trader and drop the referral (6.2).
+ *
+ * Four settlement shapes, one set of semantics. `amount` is the input on exact-in and the
+ * output on exact-out; `amountLimit` is the floor on what comes back exact-in and the
+ * ceiling on what goes out exact-out, both AFTER the route fee, so the bound a caller sets
+ * is the bound they get. `swapCurve` is exact-in only, because a bonding curve prices the
+ * output from the input and cannot be asked for a specific one.
+ *
+ * Which venues it will actually fill is an ON-CHAIN allowlist, not a property of this ABI.
+ * A pool whose hook or factory was never allowlisted reverts rather than filling somewhere
+ * unintended, which is why the allowlist getters are exposed below: a host can tell "we do
+ * not list this venue" apart from a failed trade before asking anyone to sign.
+ */
+export const rallyUniversalRouterAbi = parseAbi([
+  "struct PoolKey { address currency0; address currency1; uint24 fee; int24 tickSpacing; address hooks; }",
+  "struct SwapParams { bool zeroForOne; int256 amountSpecified; uint160 sqrtPriceLimitX96; }",
+  "function swapV3(address v3Pool, address token, bool buy, bool exactIn, uint256 amount, uint256 amountLimit, bool unwrapOut, uint256 deadline) payable returns (uint256 spent, uint256 received)",
+  "function swapV2(address pair, address token, bool buy, bool exactIn, uint256 amount, uint256 amountLimit, bool unwrapOut, uint256 deadline) payable returns (uint256 spent, uint256 received)",
+  "function swapV4(address v4Manager, PoolKey key, address token, SwapParams params, uint256 amountLimit, bool unwrapOut, uint256 deadline) payable returns (uint256 spent, uint256 received)",
+  "function swapCurve(address resolver, address token, bool buy, uint256 amountIn, uint256 minOut, bool unwrapOut, uint256 deadline) payable returns (uint256 received)",
+  "function venueHook(address hook) view returns (bool)",
+  "function poolManager(address pm) view returns (bool)",
+  "function v3Factory(address factory) view returns (bool)",
+  "function venueResolver(address resolver) view returns (bool)",
+  "function routeFeeBps() view returns (uint16)",
+  "function paused() view returns (bool)",
+]);
+
+/** The v3 fork factory a UNIV3 venue's pools are deployed by. */
+export const uniswapV3FactoryAbi = parseAbi([
+  "function getPool(address tokenA, address tokenB, uint24 fee) view returns (address pool)",
+]);
+
+/**
+ * The slice of the verified PonsV2LaunchFactory the SDK reads. One call resolves a coin's
+ * curve, its pair token and the fee/tickSpacing of the pool it graduates into, so no
+ * per-coin address ever needs configuring and no indexer is involved.
+ *
+ * `phase` is what decides the trade path: a coin still on its curve fills through
+ * `swapCurve`, a graduated one through `swapV4`.
+ */
+export const ponsV2FactoryAbi = parseAbi([
+  "struct PonsLaunchedToken { address token; address curve; address deployer; address creatorFeeRecipient; address pairToken; uint256 graduationThreshold; uint24 poolFee; int24 tickSpacing; uint16 creatorTaxBps; bool buybackEnabled; uint8 phase; uint256 sweptQuote; uint256 sweptTokens; uint256 sweptAt; bool exists; }",
+  "function getLaunchedToken(address token) view returns (PonsLaunchedToken info)",
+]);
+
+/**
+ * Doppler's Airlock, which long.xyz launches through. `getAssetData` is the per-coin record
+ * and its `numeraire` IS the coin's quote, exactly, which matters because this venue takes
+ * 337 different ones (wETH, Robinhood stock tokens, a 6dp stable, native ETH, and coins it
+ * launched itself), so a candidate-list guess would miss most of them.
+ *
+ * The struct is Doppler's published `AssetData`, field for field. Its `pool` is NOT a v4
+ * pool address (v4 pools are not contracts); the PoolKey comes from the initializer.
+ */
+export const dopplerAirlockAbi = parseAbi([
+  "struct AssetData { address numeraire; address timelock; address governance; address liquidityMigrator; address poolInitializer; address pool; address migrationPool; uint256 numTokensToSell; uint256 totalSupply; address integrator; }",
+  "function getAssetData(address asset) view returns (AssetData)",
 ]);
 
 /**

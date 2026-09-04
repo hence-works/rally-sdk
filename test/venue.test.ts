@@ -44,13 +44,18 @@ const ADDRESSES = {
   ponsV2CurveResolver: RESOLVER,
 } satisfies RallyAddresses;
 
-const NO_ROUTER = { ...ADDRESSES, rallyUniversalRouter: undefined } satisfies RallyAddresses;
+const NO_ROUTER = {
+  ...ADDRESSES,
+  rallyUniversalRouter: undefined,
+} satisfies RallyAddresses;
 
 describe("route fee", () => {
   it("takes the fee by subtraction, matching the deployed contract", () => {
     // The exact figure a 0.001 ETH exact-in buy hands the venue at 20 bps, read off a
     // simulated swapV3 on chain 4663.
-    expect(netOfRouteFee(1_000_000_000_000_000n, 20)).toBe(998_000_000_000_000n);
+    expect(netOfRouteFee(1_000_000_000_000_000n, 20)).toBe(
+      998_000_000_000_000n,
+    );
   });
 
   it("is a no-op while the fee is switched off", () => {
@@ -150,7 +155,10 @@ describe("venue swap calldata", () => {
       amountLimit: 1n,
       deadline: 99n,
     });
-    const a = decodeFunctionData({ abi: rallyUniversalRouterAbi, data: zeroForOne.data });
+    const a = decodeFunctionData({
+      abi: rallyUniversalRouterAbi,
+      data: zeroForOne.data,
+    });
     expect(a.args[3]).toMatchObject({
       zeroForOne: true,
       amountSpecified: -100n,
@@ -166,7 +174,10 @@ describe("venue swap calldata", () => {
       amountLimit: 1n,
       deadline: 99n,
     });
-    const b = decodeFunctionData({ abi: rallyUniversalRouterAbi, data: oneForZero.data });
+    const b = decodeFunctionData({
+      abi: rallyUniversalRouterAbi,
+      data: oneForZero.data,
+    });
     expect(b.args[3]).toMatchObject({
       sqrtPriceLimitX96: 1461446703485210103287273052203988822378723970341n,
     });
@@ -176,13 +187,19 @@ describe("venue swap calldata", () => {
     expect(venueApprovalFor(ADDRESSES, null, 1n)).toBeNull();
     // A native leg is spelled as the zero address on v4 and needs no allowance.
     expect(
-      venueApprovalFor(ADDRESSES, "0x0000000000000000000000000000000000000000", 1n),
+      venueApprovalFor(
+        ADDRESSES,
+        "0x0000000000000000000000000000000000000000",
+        1n,
+      ),
     ).toBeNull();
     const approval = venueApprovalFor(ADDRESSES, TOKEN, 7n);
     expect(approval?.to).toBe(TOKEN);
     expect(approval?.data.startsWith("0x095ea7b3")).toBe(true);
     // The spender is the router: this path uses no Permit2 and has no second leg.
-    expect(approval?.data.toLowerCase()).toContain(ROUTER.slice(2).toLowerCase());
+    expect(approval?.data.toLowerCase()).toContain(
+      ROUTER.slice(2).toLowerCase(),
+    );
   });
 });
 

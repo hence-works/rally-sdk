@@ -65,6 +65,14 @@ import {
   type QuoteTradeExactOutParams,
   type QuoteTradeParams,
 } from "./trade";
+import {
+  prepareVenueSwap as prepareVenueSwapInner,
+  requireVenueCoin,
+  resolveVenueCoin,
+  type PrepareVenueSwapParams,
+  type PreparedVenueSwap,
+  type VenueLocation,
+} from "./venue";
 import type {
   CurveParams,
   FeePolicy,
@@ -476,6 +484,76 @@ export function createRallyClient(config: RallyClientConfig) {
       step("confirming");
       const receipt = await waitForTransactionReceipt(publicClient, { hash });
       return { hash, receipt, quote: prepared.quote };
+    },
+
+    /**
+     * Find where a coin launched on a THIRD-PARTY launchpad we list actually trades.
+     *
+     * `null` for a Rally coin (use `getLaunch`) and for a launchpad we do not list. No
+     * indexer is involved: each venue is asked from its own on-chain record.
+     */
+    async findVenueCoin(
+      token: Address,
+      options?: { venue?: string },
+    ): Promise<VenueLocation | null> {
+      return resolveVenueCoin(publicClient, addresses.chainId, addresses, token, options ?? {});
+    },
+
+    /**
+     * Build an unsigned swap for a listed third-party coin, plus the approval it needs,
+     * without sending. Resolves the venue when `location` is omitted.
+     */
+    async prepareVenueSwap(
+      token: Address,
+      input: Omit<PrepareVenueSwapParams, "location" | "token"> & {
+        location?: VenueLocation;
+        venue?: string;
+      },
+    ): Promise<PreparedVenueSwap> {
+      const location =
+        input.location ??
+        (await requireVenueCoin(publicClient, addresses.chainId, addresses, token, {
+          venue: input.venue,
+        }));
+      return prepareVenueSwapInner(addresses, { ...input, location, token });
+    },
+
+    /** Trade a listed third-party coin: approve if needed, sign, wait. */
+    async venueSwap(
+      token: Address,
+      input: Omit<PrepareVenueSwapParams, "location" | "token"> & {
+        location?: VenueLocation;
+        venue?: string;
+        onStep?: (step: SwapStep) => void;
+      },
+    ): Promise<{ hash: Hex; receipt: TransactionReceipt; location: VenueLocation }> {
+      requireWallet();
+      const step = input.onStep ?? (() => {});
+      step("quoting");
+      const prepared = await this.prepareVenueSwap(token, input);
+
+      if (prepared.approval) {
+        step("approving");
+        const approval = await send(prepared.approval);
+        if (approval.receipt.status !== "success") {
+          throw new RallyError("LAUNCH_REVERTED", "The input-token approval reverted.", {
+            details: { transactionHash: approval.hash },
+          });
+        }
+      }
+
+      step("signing");
+      const wallet = requireWallet();
+      const hash = await sendTransaction(wallet, {
+        account: wallet.account!,
+        chain: wallet.chain ?? null,
+        to: prepared.request.to,
+        data: prepared.request.data,
+        value: prepared.request.value,
+      });
+      step("confirming");
+      const receipt = await waitForTransactionReceipt(publicClient, { hash });
+      return { hash, receipt, location: prepared.location };
     },
 
     /**
