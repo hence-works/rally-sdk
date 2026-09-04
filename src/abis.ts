@@ -247,6 +247,16 @@ export const rallyHookU4Abi = parseAbi([
   // neither the hook nor the facet.
   "function referralOwed(bytes32 pid, address referrer) view returns (uint256)",
   "function claimReferralFees(bytes32 pid) returns (uint256 amount)",
+  // The referrer's share OF THE PLATFORM'S CUT, in bps, not a share of the fee: the
+  // amount credited is `fee * feeSchedule.platformBps / 10000 * referralBps / 10000`, so
+  // quoting this figure on its own overstates what a referrer earns by whatever the
+  // platform's cut is. Read `RallyLensU4.feeScheduleOf(pid).platformBps` for the other
+  // half, and note that one is frozen per launch while this one is live and global.
+  //
+  // Held on the hook rather than read from `REGISTRY_KEYS.REFERRAL_FEE_BPS`: these
+  // contracts hold no registry, the factory does. That key is the v1 path, and the two
+  // can hold different values.
+  "function referralBps() view returns (uint16)",
   // The hook keeps no convenience getters at all. A v4 hook's address encodes its
   // permissions, so it can never be replaced without abandoning every pool it hosts, which
   // means it has to fit under EIP-170 permanently: getters are the cheapest thing to give
