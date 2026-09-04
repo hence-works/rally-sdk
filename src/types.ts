@@ -106,8 +106,8 @@ export interface CurveShapes {
 
 /**
  * One PROTOCOL v2 generation. Role-named like `LegacyDeployment`, so a caller that only
- * needs an address can treat the two uniformly: `launchHook` is `RallyHookV2`,
- * `rallyFactory` is `RallyFactoryV2`.
+ * needs an address can treat the two uniformly: `launchHook` is `RallyHookU4`,
+ * `rallyFactory` is `RallyFactoryU4`.
  */
 export interface V2Deployment {
   launchHook: Address;
@@ -123,7 +123,7 @@ export interface V2Deployment {
    */
   curveShapes?: Address;
   /**
-   * `RallyLensV2`, the generation's read API. Every per-pool getter lives here rather than
+   * `RallyLensU4`, the generation's read API. Every per-pool getter lives here rather than
    * on the hook, which keeps one state accessor and no convenience getters so it can fit
    * under EIP-170 permanently (its address encodes its permissions, so it can never be
    * replaced without abandoning every pool it hosts).
@@ -180,7 +180,7 @@ export interface HookGeneration {
   launchHook: Address;
   rallyRouter: Address;
   /**
-   * Which PROTOCOL this generation runs: 1 for `RallyHook`, 2 for `RallyHookV2`.
+   * Which PROTOCOL this generation runs: 1 for `RallyHook`, 2 for `RallyHookU4`.
    *
    * Not cosmetic. It decides how a curve trade is priced, which is the one thing a host
    * cannot get wrong quietly:
@@ -198,7 +198,7 @@ export interface HookGeneration {
   protocolVersion: 1 | 2;
   /** v2 only: the shape table this generation's launches are built from. */
   curveShapes?: Address;
-  /** v2 only: `RallyLensV2`, where every per-pool read lives. Absent means this SDK
+  /** v2 only: `RallyLensU4`, where every per-pool read lives. Absent means this SDK
    *  version's manifest predates the lens, and v2 state cannot be read for it. */
   lens?: Address;
   /** Absent for a generation deployed before the creation path split out of the hook. */
@@ -404,7 +404,7 @@ export interface LaunchState {
   /** The CREATE2 deployer of this coin's generation, when known. */
   launchLib?: Address;
   /**
-   * Which PROTOCOL this coin runs on: 1 for `RallyHook`, 2 for `RallyHookV2`. Permanent,
+   * Which PROTOCOL this coin runs on: 1 for `RallyHook`, 2 for `RallyHookU4`. Permanent,
    * since a v4 hook is part of the PoolKey.
    *
    * Branch on this before reading `poolPriceWad` or quoting a curve trade. On v1 the field

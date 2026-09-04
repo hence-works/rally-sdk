@@ -169,27 +169,36 @@ export const erc20Abi = parseAbi([
  * there is no bespoke launch event to read instead.)
  */
 /**
- * RallyFactoryV2 — the PROTOCOL v2 creation path.
+ * RallyFactoryU4 (deployed as protocol v2) — the PROTOCOL v2 creation path, settled on
+ * Uniswap v4.
  *
- * Two differences an integrator will hit. `launch` gained a `curvePreset` overload (v2
- * launches pick a curve SHAPE, §4.2), and none of the four forms is `payable`: v2 is
- * wETH-only, so a launch never carries native value. The mining helpers, the quote
- * allowlist is unchanged, and `quotes(address)` is
- * byte-identical to v1's, so a caller reading launch terms needs no branch.
+ * `launch` has TWO forms. The struct form takes full control of both fee rows and the
+ * curve shape; the 6-arg form defers all of it to the factory's own defaults. Both are
+ * `payable`, and for a wETH-quoted launch either funding path works: send
+ * `msg.value == launchFee + initialBuy` and the factory wraps it once, or send nothing
+ * and have the same total pulled from an ERC-20 approval to the FACTORY. Every other
+ * quote is approval-only. The mining helpers and the quote allowlist are unchanged, and
+ * `quotes(address)` is byte-identical to v1's, so a caller reading launch terms needs no
+ * branch.
  */
-export const rallyFactoryV2Abi = parseAbi([
-  // Every explicit overload names TWO fee rows (§5.5): the split while the coin is on the
-  // curve, then the split from breakout onward. They are validated against different
-  // creator ceilings — `CREATOR_CAP_BPS` for the curve row, the wider
-  // `BREAKOUT_CREATOR_CAP_BPS` for the other — which is the whole point of there being
-  // two. Pass the same value twice for a launch whose routing should not change when it
-  // breaks out. The 6-arg overload below takes both of the factory's own defaults.
-  "function launch(string name, string symbol, string metadataURI, bytes32 salt, address quote, uint256 initialBuy, (uint16 creatorBps, uint16 dividendBps, uint16 buybackBps, uint16 lpSupportBps) feeConfig, (uint16 creatorBps, uint16 dividendBps, uint16 buybackBps, uint16 lpSupportBps) breakoutFeeConfig, uint8 curvePreset) payable returns (bytes32 pid, address token)",
-  // A shape of the creator's own rather than a preset (§4.5). Gated by
-  // `RallyCurveShapes.customAllowed`, and held to the same guards a preset passes: the
-  // shape rules, the hook's allocation band, and its opening-depth window.
-  "function launchCustom(string name, string symbol, string metadataURI, bytes32 salt, address quote, uint256 initialBuy, (uint16 creatorBps, uint16 dividendBps, uint16 buybackBps, uint16 lpSupportBps) feeConfig, (uint16 creatorBps, uint16 dividendBps, uint16 buybackBps, uint16 lpSupportBps) breakoutFeeConfig, (uint16 startBps, uint16 endBps, uint16 numPositions, uint16 sharesBps, bool anchorAtFar)[] segments) payable returns (bytes32 pid, address token)",
-  "function launch(string name, string symbol, string metadataURI, bytes32 salt, address quote, uint256 initialBuy, (uint16 creatorBps, uint16 dividendBps, uint16 buybackBps, uint16 lpSupportBps) feeConfig, (uint16 creatorBps, uint16 dividendBps, uint16 buybackBps, uint16 lpSupportBps) breakoutFeeConfig) payable returns (bytes32 pid, address token)",
+export const rallyFactoryU4Abi = parseAbi([
+  // One struct replaces the former 8-arg, 9-arg and `launchCustom` overloads. They were
+  // collapsed because the generated decoder for a 10-parameter external function is more
+  // than the legacy code generator can schedule, and the protocol now builds without
+  // via-IR. Every member carries exactly the meaning it had as a parameter.
+  //
+  // Both fee rows are named together (§5.5): the split while the coin is on the curve,
+  // then the split from breakout onward. They are validated against different creator
+  // ceilings, `CREATOR_CAP_BPS` for the curve row and the wider `BREAKOUT_CREATOR_CAP_BPS`
+  // for the other, which is the whole point of there being two. Pass the same value twice
+  // for a launch whose routing should not change when it breaks out.
+  //
+  // `segments` is the former `launchCustom`: empty selects `curvePreset`, non-empty is a
+  // shape of the creator's own (§4.5) and `curvePreset` is then IGNORED rather than
+  // conflicting. A custom shape is gated by `RallyCurveShapes.customAllowed` and held to
+  // the same guards a preset passes: the shape rules, the hook's allocation band, and its
+  // opening-depth window.
+  "function launch((string name, string symbol, string metadataURI, bytes32 salt, address quote, uint256 initialBuy, (uint16 creatorBps, uint16 dividendBps, uint16 buybackBps, uint16 lpSupportBps) feeConfig, (uint16 creatorBps, uint16 dividendBps, uint16 buybackBps, uint16 lpSupportBps) breakoutFeeConfig, uint8 curvePreset, (uint16 startBps, uint16 endBps, uint16 numPositions, uint16 sharesBps, bool anchorAtFar)[] segments) args) payable returns (bytes32 pid, address token)",
   "function launch(string name, string symbol, string metadataURI, bytes32 salt, address quote, uint256 initialBuy) payable returns (bytes32 pid, address token)",
   "function predictToken(bytes32 salt, string name, string symbol) view returns (address)",
   "function packSalt(address creator, uint96 nonce) pure returns (bytes32)",
@@ -214,7 +223,7 @@ export const rallyFactoryV2Abi = parseAbi([
 ]);
 
 /**
- * RallyHookV2 — the PROTOCOL v2 per-pool reads.
+ * RallyHookU4 — the PROTOCOL v2 per-pool reads.
  *
  * Deliberately NOT a superset of `rallyHookAbi`. Three v1 reads are gone and one is
  * renamed, and the reasons are the same reason v2 exists:
@@ -229,17 +238,17 @@ export const rallyFactoryV2Abi = parseAbi([
  *   - `launchedAt`/`graduatedAt` fold into `launchOf`, one call instead of two, and the
  *     second is now `brokeOutAt` — v2 breaks out, it does not graduate (§4.7).
  */
-export const rallyHookV2Abi = parseAbi([
+export const rallyHookU4Abi = parseAbi([
   // The hook keeps no convenience getters at all. A v4 hook's address encodes its
   // permissions, so it can never be replaced without abandoning every pool it hosts, which
   // means it has to fit under EIP-170 permanently: getters are the cheapest thing to give
   // up, since each drags an ABI encoder in to return data already exposed here. Everything
-  // derivable lives on `rallyLensV2Abi` instead.
+  // derivable lives on `rallyLensU4Abi` instead.
   //
   // Raw slots, not a typed getter. Returning a `Launch` across the ABI cost the hook 1,352
   // bytes of runtime — measured — for a read path, against a contract that can never be
   // redeployed. So the hook publishes storage and the typed shape is rebuilt off-chain;
-  // `RallyLensV2` is that reconstruction, and is what a host should read. These are here
+  // `RallyLensU4` is that reconstruction, and is what a host should read. These are here
   // for the lens itself and for anyone reading a field the lens does not expose.
   "function extsload(bytes32 slot) view returns (bytes32)",
   "function extsload(bytes32 startSlot, uint256 n) view returns (bytes32[])",
@@ -256,7 +265,7 @@ export const rallyHookV2Abi = parseAbi([
   // `activeFeeConfigOf` on the lens for why the switch lags by one collection.
   "event BreakoutSplitArmed(bytes32 indexed pid)",
   // Writes. There is deliberately no `creatorFees` READ here: v2 has no such getter, and
-  // the claimable balance is `RallyLensV2.quoteFeesOf(pid).creator`. Note that
+  // the claimable balance is `RallyLensU4.quoteFeesOf(pid).creator`. Note that
   // `claimCreatorFees` pokes first, so a claim can pay MORE than that balance reads right
   // now: fees sitting uncollected on the positions are realised by the poke.
   "function claimCreatorFees(bytes32 pid) returns (uint256)",
@@ -264,7 +273,7 @@ export const rallyHookV2Abi = parseAbi([
 ]);
 
 /**
- * RallyLensV2 — the v2 read API.
+ * RallyLensU4 — the v2 read API.
  *
  * Deployed alongside the hook and recorded per generation, because it is constructed
  * against one hook and a coin must be read through ITS generation's lens. It holds
@@ -274,7 +283,7 @@ export const rallyHookV2Abi = parseAbi([
  * Not an oracle. `spotPriceWad` and `bondedOf` read live `slot0`, which anyone can move
  * within a block: read them to display a coin, never to price a trade against.
  */
-export const rallyLensV2Abi = parseAbi([
+export const rallyLensU4Abi = parseAbi([
   "function phaseOf(bytes32 pid) view returns (uint8)",
   "function bondedOf(bytes32 pid) view returns (uint256)",
   "function gradThreshold(bytes32 pid) view returns (uint256)",

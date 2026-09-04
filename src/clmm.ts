@@ -114,7 +114,7 @@ export function amount1Delta(
  * approximating it.
  *
  * With `wantCurrency0: false` and the quote as currency1 this is the launch's `bonded` —
- * the same number `RallyHookV2.bondedOf` computes on chain.
+ * the same number `RallyHookU4.bondedOf` computes on chain.
  */
 export function ladderAmount(
   ladder: readonly LadderPosition[],

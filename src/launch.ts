@@ -19,7 +19,7 @@ import {
   type TransactionReceipt,
 } from "viem";
 import { readContract } from "viem/actions";
-import { erc20Abi, rallyFactoryAbi, rallyFactoryV2Abi, rallyHookAbi } from "./abis";
+import { erc20Abi, rallyFactoryAbi, rallyFactoryU4Abi, rallyHookAbi } from "./abis";
 import { currentGeneration } from "./addresses";
 import { RallyError } from "./errors";
 import { mineSalt } from "./mine-core";
@@ -242,7 +242,7 @@ async function readV2DefaultFees(
 ): Promise<FeeSplit> {
   const [creatorBps, dividendBps, buybackBps, lpSupportBps] = await readContract(client, {
     address: factory,
-    abi: rallyFactoryV2Abi,
+    abi: rallyFactoryU4Abi,
     functionName: row === "breakout" ? "defaultBreakoutFeeConfig" : "defaultFeeConfig",
   });
   return { creatorBps, dividendBps, buybackBps, lpSupportBps };
@@ -659,7 +659,7 @@ export async function prepareLaunch(
     );
   }
   const factory = protocolVersion === 2 ? generation!.rallyFactory! : ctx.factory;
-  const factoryAbi = protocolVersion === 2 ? rallyFactoryV2Abi : rallyFactoryAbi;
+  const factoryAbi = protocolVersion === 2 ? rallyFactoryU4Abi : rallyFactoryAbi;
   const launchHook = protocolVersion === 2 ? generation!.launchHook : addresses.launchHook;
 
   const name = params.name.trim();
@@ -715,7 +715,7 @@ export async function prepareLaunch(
     // deployment's caps: the two registries are independent contracts under separate
     // governance, and v2 additionally has a key v1 does not (`BREAKOUT_CREATOR_CAP_BPS`),
     // so the breakout row was measured against a ceiling that registry never held.
-    // `RallyFactoryV2._validateFeeConfig` enforces the real caps on chain either way, so
+    // `RallyFactoryU4._validateFeeConfig` enforces the real caps on chain either way, so
     // the symptom was a preflight that passed a split the transaction then reverted on
     // (or rejected one that was legal), not a bad split reaching the hook.
     const policy = await ctx.feePolicy(generation?.paramRegistry);
@@ -745,7 +745,7 @@ export async function prepareLaunch(
   // v2 did NOT always do this. Its factory took both legs with `safeTransferFrom` and was
   // not payable, so an SDK version older than the payable factory refused this path
   // outright. If a v2 launch reverts here with no revert reason, check that the chain's
-  // `RallyFactoryV2` is the payable one: `hook.factory()` is the address that matters, not
+  // `RallyFactoryU4` is the payable one: `hook.factory()` is the address that matters, not
   // whatever a stale manifest names.
   const fundWith = params.fundWith ?? (quote.isNative ? "native" : "erc20");
   if (fundWith === "native" && !quote.isNative) {
@@ -861,51 +861,67 @@ export async function prepareLaunch(
   // omitting a preset defers to flat the same way.
   const base = [name, symbol, metadataURI, salt, quote.address, initialBuy] as const;
 
-  // A v2 launch freezes TWO fee rows (§5.5) and every explicit overload names both, so a
-  // caller who spells out one has to spell out the other. Defaulting the unnamed row to
-  // the factory's own value for THAT row is the only safe fill: they are different splits,
-  // so copying the named row across would silently rewrite whichever the caller left
-  // alone. Read only when actually needed — the 6-arg path below reads neither.
+  // A v2 launch freezes TWO fee rows (§5.5) and the struct form names both, so a caller
+  // who spells out one has to spell out the other. Defaulting the unnamed row to the
+  // factory's own value for THAT row is the only safe fill: they are different splits, so
+  // copying the named row across would silently rewrite whichever the caller left alone.
+  // Read only when actually needed, since the defaults path below reads neither.
   const v2Rows = async (): Promise<readonly [FeeSplit, FeeSplit]> => [
     params.fees ?? (await readV2DefaultFees(client, factory, "curve")),
     params.breakoutFees ?? (await readV2DefaultFees(client, factory, "breakout")),
   ];
 
-  const data =
-    protocolVersion === 2 && params.curveSegments !== undefined
-      ? encodeFunctionData({
-          abi: rallyFactoryV2Abi,
-          functionName: "launchCustom",
-          args: [...base, ...(await v2Rows()), params.curveSegments],
-        })
-      : protocolVersion === 2 && params.curvePreset !== undefined
-      ? encodeFunctionData({
-          abi: rallyFactoryV2Abi,
+  // v2's four launch overloads are one calldata struct now, so the four-way branch this
+  // used to be collapses to a single question: did the caller ask for anything at all
+  // beyond the factory's own defaults? A struct has no tail to omit, so once the answer is
+  // yes, every field has to be named.
+  const v2Custom =
+    protocolVersion === 2 &&
+    (params.curveSegments !== undefined ||
+      params.curvePreset !== undefined ||
+      params.fees !== undefined ||
+      params.breakoutFees !== undefined);
+
+  const v2Args = async () => {
+    const [feeConfig, breakoutFeeConfig] = await v2Rows();
+    return {
+      name,
+      symbol,
+      metadataURI,
+      salt,
+      quote: quote.address,
+      initialBuy,
+      feeConfig,
+      breakoutFeeConfig,
+      // `PRESET_FLAT`, which is what BOTH of the removed overloads that took no preset
+      // passed. A caller who names only fees therefore still lands on the curve they
+      // landed on before. The factory ignores it outright when `segments` is non-empty,
+      // and the two are rejected together above in any case.
+      curvePreset: params.curvePreset ?? 0,
+      // The former `launchCustom`. Empty selects `curvePreset` instead.
+      segments: params.curveSegments ?? [],
+    };
+  };
+
+  const data = v2Custom
+    ? encodeFunctionData({
+        abi: rallyFactoryU4Abi,
+        functionName: "launch",
+        args: [await v2Args()],
+      })
+    : params.fees
+      ? // v1 only. A v2 launch carrying a fee split is always `v2Custom` above, and the v2
+        // factory no longer has a form that takes one fee row without the other.
+        encodeFunctionData({
+          abi: factoryAbi,
           functionName: "launch",
-          // There is no (base + preset) overload without the splits, so choosing a shape
-          // means naming them. The defaults come from the factory rather than a guess: they
-          // are not the registry's `DEFAULT_*_BPS` (those are v1's and seed creator-only),
-          // and a creator who did not ask to change their routing must not have it changed
-          // by picking a curve.
-          args: [...base, ...(await v2Rows()), params.curvePreset],
+          args: [...base, params.fees],
         })
-      : protocolVersion === 2 && (params.fees || params.breakoutFees)
-        ? encodeFunctionData({
-            abi: rallyFactoryV2Abi,
-            functionName: "launch",
-            args: [...base, ...(await v2Rows())],
-          })
-        : params.fees
-          ? encodeFunctionData({
-              abi: factoryAbi,
-              functionName: "launch",
-              args: [...base, params.fees],
-            })
-          : encodeFunctionData({
-              abi: factoryAbi,
-              functionName: "launch",
-              args: [...base],
-            });
+      : encodeFunctionData({
+          abi: factoryAbi,
+          functionName: "launch",
+          args: [...base],
+        });
 
   return {
     token,
@@ -973,7 +989,7 @@ export function parseLaunchReceipt(
       // liquidity, so the core v4 `Swap` in the same transaction carries both), which
       // gives it a different topic0. Decoding with only v1's would silently leave
       // `firstBuyTokens` undefined on every v2 launch that bought in.
-      for (const abi of [rallyFactoryAbi, rallyFactoryV2Abi]) {
+      for (const abi of [rallyFactoryAbi, rallyFactoryU4Abi]) {
         try {
           const d = decodeEventLog({ abi, data: log.data, topics: log.topics });
           if (d.eventName === "FirstBuy") {

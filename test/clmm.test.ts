@@ -2,7 +2,7 @@
  * PROTOCOL v2 curve math.
  *
  * The end-to-end fixture below is not hand-computed. It was captured from a real
- * `RallyHookV2` on a local anvil: deploy, launch a coin, read `positionsOf`, then buy 1
+ * `RallyHookU4` on a local anvil: deploy, launch a coin, read `positionsOf`, then buy 1
  * wETH through `RallyRouter` and record what the pool actually paid out. The assertion is
  * that `simulateSwap` reproduces that fill to the wei, which is the only claim that
  * matters here — an off-chain quote that is close is a quote that reverts on `minOut`.

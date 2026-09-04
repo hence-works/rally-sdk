@@ -25,7 +25,7 @@ import {
   erc20Abi,
   poolManagerAbi,
   rallyHookAbi,
-  rallyLensV2Abi,
+  rallyLensU4Abi,
   rallyRouterAbi,
   uniswapV3PoolAbi,
 } from "./abis";
@@ -256,7 +256,7 @@ export async function resolveLaunch(
       if (!via) return Promise.resolve(0);
       return readContract(client, {
         address: via,
-        abi: gen.protocolVersion === 2 ? rallyLensV2Abi : rallyHookAbi,
+        abi: gen.protocolVersion === 2 ? rallyLensU4Abi : rallyHookAbi,
         functionName: "phaseOf",
         args: [poolIdFor(key)],
       }).catch(() => 0);
@@ -384,14 +384,14 @@ async function resolveLaunchV2(args: {
   if (!lens) {
     throw new RallyError(
       "MISSING_ADDRESS",
-      `Protocol v2 hook ${hook} on chain ${addresses.chainId} has no RallyLensV2 recorded, ` +
+      `Protocol v2 hook ${hook} on chain ${addresses.chainId} has no RallyLensU4 recorded, ` +
         `so its launches cannot be read. Upgrade the SDK, or pass the generation's \`lens\` ` +
         `through \`addresses.v2Deployments\`.`,
       { details: { chainId: addresses.chainId, hook } },
     );
   }
   const v2 = (functionName: "bondedOf" | "gradThreshold" | "curvePresetOf" | "curveSupplyOf") =>
-    readContract(client, { address: lens, abi: rallyLensV2Abi, functionName, args: [pid] });
+    readContract(client, { address: lens, abi: rallyLensU4Abi, functionName, args: [pid] });
 
   const [quote, bonded, gradThreshold, info, feeSplit, positions, support, slot0Word, preset] =
     await Promise.all([
@@ -405,19 +405,19 @@ async function resolveLaunchV2(args: {
       v2("gradThreshold"),
       readContract(client, {
         address: lens,
-        abi: rallyLensV2Abi,
+        abi: rallyLensU4Abi,
         functionName: "launchOf",
         args: [pid],
       }),
       readContract(client, {
         address: lens,
-        abi: rallyLensV2Abi,
+        abi: rallyLensU4Abi,
         functionName: "feeConfigOf",
         args: [pid],
       }),
       readContract(client, {
         address: lens,
-        abi: rallyLensV2Abi,
+        abi: rallyLensU4Abi,
         functionName: "positionsOf",
         args: [pid],
       }),
@@ -428,7 +428,7 @@ async function resolveLaunchV2(args: {
       // the pool holds, which shows up as slippage the swap does not actually incur.
       readContract(client, {
         address: lens,
-        abi: rallyLensV2Abi,
+        abi: rallyLensU4Abi,
         functionName: "supportOf",
         args: [pid],
       }),
