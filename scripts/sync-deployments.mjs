@@ -126,7 +126,9 @@ const body = entries
     rallyRouter: ${field(m.RallyRouter)},
     dividendDistributor: ${field(m.DividendDistributor)},
     rallyVault: ${field(m.RallyVault)},
-    gachaVault: ${field(m.GachaVault)},${legacy(m)}${v2(m)}
+    gachaVault: ${field(m.GachaVault)},
+    rallyUniversalRouter: ${field(m.RallyUniversalRouter)},
+    ponsV2CurveResolver: ${field(m.PonsV2CurveResolver)},${legacy(m)}${v2(m)}
   },`,
   )
   .join("\n");

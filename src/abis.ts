@@ -375,3 +375,57 @@ export const uniswapV3PoolAbi = parseAbi([
   "function token1() view returns (address)",
   "function fee() view returns (uint24)",
 ]);
+
+/**
+ * `RallyUniversalRouter` — the entrypoint for trading a THIRD-PARTY launchpad's coin.
+ *
+ * A different contract from `rallyRouterAbi` above, and the two are not interchangeable
+ * in either direction. `RallyRouter` serves Rally's own coins and nothing else;
+ * this one is refused them, because Rally's hook is deliberately left off its venue
+ * allowlist. A host that lists both kinds of coin needs both.
+ *
+ * Four entrypoints, one per settlement shape, and the caller picks:
+ *
+ *   swapV3     a v3-fork pool. Pass the POOL, not a path.
+ *   swapV2     a v2-style pair.
+ *   swapCurve  a coin still on a third-party bonding curve, reached through a
+ *              venue RESOLVER rather than a caller-supplied curve address.
+ *   swapV4     a coin in a hooked v4 pool.
+ *
+ * Three things the router enforces, all of which a caller must respect:
+ *
+ *   ALLOWLIST   a v3 pool must come from an allowlisted factory, round-tripped through
+ *               that factory's own `getPool` so a forged `factory()` getter cannot
+ *               satisfy it; a v4 pool must sit on an allowlisted PoolManager AND carry
+ *               an allowlisted venue hook. An unlisted venue is unroutable, not
+ *               mis-routed. Read the allowlist first rather than discovering it in a
+ *               revert.
+ *   APPROVAL    a plain ERC-20 approval to the router. No Permit2 anywhere.
+ *   ETH         `msg.value` must EQUAL the budget, not merely cover it. The router
+ *               wraps it when the venue quotes in wETH and refunds what the fill leaves.
+ *
+ * `amountLimit` reverses meaning with the trade shape, exactly as `RallyRouter`'s does:
+ * a FLOOR on what is received when exact-in, a CEILING on what is spent when exact-out.
+ */
+export const rallyUniversalRouterAbi = parseAbi([
+  "function swapV3(address v3Pool, address token, bool buy, bool exactIn, uint256 amount, uint256 amountLimit, bool unwrapOut, uint256 deadline) payable returns (uint256 spent, uint256 received)",
+  "function swapV2(address pair, address token, bool buy, bool exactIn, uint256 amount, uint256 amountLimit, bool unwrapOut, uint256 deadline) payable returns (uint256 spent, uint256 received)",
+  // Exact-in only, on both sides: a bonding curve is solved forward and the router
+  // exposes no exact-output form for one.
+  "function swapCurve(address resolver, address token, bool buy, uint256 amountIn, uint256 minOut, bool unwrapOut, uint256 deadline) payable returns (uint256 received)",
+  "function swapV4(address v4Manager, (address currency0, address currency1, uint24 fee, int24 tickSpacing, address hooks) key, address token, (bool zeroForOne, int256 amountSpecified, uint160 sqrtPriceLimitX96) params, uint256 amountLimit, bool unwrapOut, uint256 deadline) payable returns (uint256 spent, uint256 received)",
+  // Owner-settable up to a compile-time 25, so read it rather than hardcoding: it is a
+  // term of every quote on this router.
+  "function routeFeeBps() view returns (uint16)",
+  "function MAX_ROUTE_FEE_BPS() view returns (uint16)",
+  "function paused() view returns (bool)",
+  "function treasury() view returns (address)",
+  "function poolManager(address pm) view returns (bool)",
+  "function v3Factory(address factory) view returns (bool)",
+  "function v2Factory(address factory) view returns (bool allowed, uint16 feeBps)",
+  "function venueHook(address hook) view returns (bool)",
+  "function venueResolver(address resolver) view returns (bool)",
+  // `quoteAmount` INCLUDES the route fee on a buy and EXCLUDES it on a sell, which is
+  // why the fee is carried separately rather than inferred from the two amounts.
+  "event RallyRouted(address indexed trader, address indexed token, address indexed venue, bytes32 poolId, address quote, bool buy, uint256 quoteAmount, uint256 tokenAmount, uint256 fee)",
+]);

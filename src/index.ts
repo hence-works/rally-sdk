@@ -51,6 +51,7 @@ export {
   rallyParamRegistryAbi,
   rallyRouterAbi,
   rallyTokenAbi,
+  rallyUniversalRouterAbi,
   uniswapV3PoolAbi,
 } from "./abis";
 
@@ -189,6 +190,29 @@ export type {
   QuoteTradeExactOutParams,
   QuoteTradeParams,
 } from "./trade";
+
+// Trading a third-party launchpad's coin, through RallyUniversalRouter. A different
+// contract from `rallyRouter` with different rules: it will not fill a Rally coin, and
+// Rally's router will not fill a foreign one.
+export {
+  grossForNetRouteFee,
+  netOfRouteFee,
+  prepareVenueSwapCurve,
+  prepareVenueSwapV2,
+  prepareVenueSwapV3,
+  prepareVenueSwapV4,
+  readRouteFeeBps,
+  readVenuePaused,
+  readVenueRoutable,
+  venueApprovalFor,
+} from "./venue";
+export type {
+  PrepareVenueSwapCurveParams,
+  PrepareVenueSwapPoolParams,
+  PrepareVenueSwapV4Params,
+  VenueAllowlistQuery,
+  VenueFill,
+} from "./venue";
 
 // Metadata pinning
 export { cleanMetadata, createRallyPinner } from "./metadata";

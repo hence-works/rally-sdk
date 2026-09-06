@@ -39,6 +39,24 @@ export interface RallyAddresses {
    */
   gachaVault?: Address;
   /**
+   * Entrypoint for trading a THIRD-PARTY launchpad's coin through Rally. `rallyRouter`
+   * above serves only Rally's own coins and this one is refused them, so a host listing
+   * both kinds needs both addresses.
+   *
+   * Always the PROXY, and the address never moves: a new implementation is an upgrade
+   * from the router's owner rather than a redeploy, because traders hold ERC-20
+   * approvals against it. Absent on a chain with no external venues, which is the
+   * signal that aggregated trading is simply off there.
+   */
+  rallyUniversalRouter?: Address;
+  /**
+   * Resolves a Pons v2 coin to the bonding curve that fills it, for
+   * {@link rallyUniversalRouter}'s `swapCurve` path. Venue specific by construction, so
+   * a venue that launches straight into a pool has a hook on the allowlist and no
+   * resolver here. Absent means curve-phase coins on that venue cannot be routed.
+   */
+  ponsV2CurveResolver?: Address;
+  /**
    * Every PREVIOUS hook generation still live on this chain, newest first.
    *
    * A v4 hook address is part of every PoolKey, so a protocol redeploy cannot migrate

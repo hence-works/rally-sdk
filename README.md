@@ -381,6 +381,67 @@ from logs without an indexer.
 
 ---
 
+## Trading other launchpads' coins
+
+Everything above is about coins launched on Rally. If you list an aggregated feed, the
+other rows settle through a second contract, `RallyUniversalRouter`, under `rally.venue`.
+
+The two routers are **not interchangeable in either direction.** `RallyRouter` fills only
+Rally's coins; the universal router is refused them, because Rally's hook is deliberately
+left off its venue allowlist. Route by which venue launched the coin.
+
+```ts
+const feeBps = await rally.venue.routeFeeBps();     // read it, do not hardcode
+
+// Check the venue before your user signs, not as a revert.
+const { routable, reasons } = await rally.venue.routable({ v3Factory });
+if (!routable) return reasons;
+
+// Quote the VENUE on what the venue actually receives.
+const poolIn = netOfRouteFee(budget, feeBps);
+const out = await yourQuoter(poolIn);
+
+const tx = rally.venue.prepareSwapV3(pool, {
+  token, buy: true, exactIn: true,
+  amount: budget,                       // what the trader pays, fee included
+  amountLimit: applySlippage(out, 100n), // FLOOR when exact-in
+  deadline: await rally.chainDeadline(),
+  value: budget,                        // native input: must EQUAL the budget
+});
+await rally.venue.send(tx);
+```
+
+Four entrypoints, one per settlement shape: `prepareSwapV3` (pass the **pool**, not a
+path), `prepareSwapV2`, `prepareSwapCurve` (pass the venue's **resolver**, never a curve
+address) and `prepareSwapV4`. Each has the unsigned form shown above; `rally.venue.send`
+submits one if you would rather not.
+
+**The route fee is a term of every quote.** Rally charges bps of the quote crossing the
+trader's wallet and always takes it by subtraction: on a buy the venue is handed
+`budget - fee`, so an exact-input buy costs exactly what the trader typed and the venue
+fills a slightly smaller trade; on a sell the trader receives `payout - fee`. So quoting
+the raw typed figure is wrong in both directions, and the floor you derive from it will
+not fill. Convert with `netOfRouteFee` and `grossForNetRouteFee`. On an exact-**output**
+sell the router's `amount` is what the venue must produce, so pass
+`grossForNetRouteFee(wanted, feeBps)` to have the trader receive `wanted`.
+
+**Approvals are one plain ERC-20 allowance** to the router, via
+`rally.venue.prepareApproval(asset, amount)`. No Permit2 and no second leg. Size it to
+what the router may *pull*, which on an exact-output trade is the ceiling, not the
+estimate. A buy paying in native ETH approves nothing and attaches `value` instead, and
+the router requires `msg.value` to **equal** the budget rather than merely cover it,
+refunding whatever the fill leaves.
+
+This SDK does **not** quote these venues. They are third-party contracts and their
+pricing is theirs, so pricing them here would be a promise about somebody else's contract
+that we could not keep across their next redeploy. Quote the venue yourself and convert.
+
+`rallyUniversalRouter` is absent on a chain with no external venues, which is the signal
+that aggregated trading is off there rather than an error; the helpers throw
+`MISSING_ADDRESS` rather than building calldata to nowhere.
+
+---
+
 ## Chains & addresses
 
 Addresses ship with the package, per chain, generated from the monorepo's deployment

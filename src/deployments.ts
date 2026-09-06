@@ -18,6 +18,8 @@ export const DEPLOYMENTS: Record<number, RallyAddresses> = {
     dividendDistributor: "0x6000908180132982AA17a4D7C2418a58FD0d4e0a",
     rallyVault: "0x6770Cf9EccA6D1C6060951f8F75507544CBA88F7",
     gachaVault: "0x365be759C7A5a7567637626b6b4f4c9a0e648abE",
+    rallyUniversalRouter: "0xec22403fBa0dADc562CD98a6B2C5FFcfC19A5634",
+    ponsV2CurveResolver: "0x1Ee3dB2590bfc1732C4617C0cDbc92399Df5AEC5",
     legacyDeployments: [
       {
         launchHook: "0x38545dDedD7b1Af79685aF76F4369Bf1A8f928cc",
@@ -60,6 +62,8 @@ export const DEPLOYMENTS: Record<number, RallyAddresses> = {
     dividendDistributor: "0xE1F1e2890CA088e08662D2344FD8391105C4e531",
     rallyVault: "0x5bd485A3059D459eA6D6DFd49fE7a2Ff2Af67C11",
     gachaVault: "0x937a1EDBff87165850F848F9F377D1Aa4611ba91",
+    rallyUniversalRouter: undefined,
+    ponsV2CurveResolver: undefined,
     v2Deployments: [
       {
         launchHook: "0x8b154E294E8F44B4ca94b42D898488D44EE768Cc",

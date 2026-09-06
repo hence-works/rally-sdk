@@ -30,6 +30,20 @@ import {
   type PreparedLaunch,
 } from "./launch";
 import { cleanMetadata, createRallyPinner, type MetadataConfig, type MetadataPinner } from "./metadata";
+import {
+  prepareVenueSwapCurve as prepareVenueSwapCurveInner,
+  prepareVenueSwapV2 as prepareVenueSwapV2Inner,
+  prepareVenueSwapV3 as prepareVenueSwapV3Inner,
+  prepareVenueSwapV4 as prepareVenueSwapV4Inner,
+  readRouteFeeBps as readRouteFeeBpsInner,
+  readVenuePaused as readVenuePausedInner,
+  readVenueRoutable as readVenueRoutableInner,
+  venueApprovalFor as venueApprovalForInner,
+  type PrepareVenueSwapCurveParams,
+  type PrepareVenueSwapPoolParams,
+  type PrepareVenueSwapV4Params,
+  type VenueAllowlistQuery,
+} from "./venue";
 import { createCache, readCurveParams, readFeePolicy } from "./params";
 import {
   prepareClaimReferralFees as prepareClaimReferralFeesInner,
@@ -555,6 +569,49 @@ export function createRallyClient(config: RallyClientConfig) {
         );
       }
       return readReferralFeesInner(publicClient, addresses, who, quote, hook);
+    },
+
+    /**
+     * Trading a THIRD-PARTY launchpad's coin, through `RallyUniversalRouter`.
+     *
+     * Kept behind its own namespace because it is a different contract with different
+     * rules, not another spelling of {swap}: Rally's own router will not fill a foreign
+     * coin and the universal router will not fill a Rally one. Route by which venue
+     * launched the coin.
+     *
+     * Nothing here quotes. The venues are third-party contracts and their pricing is
+     * theirs, so a host quotes the venue itself and converts with `netOfRouteFee` /
+     * `grossForNetRouteFee` before setting a bound. See `src/venue.ts`.
+     */
+    venue: {
+      /** The router's live route fee in bps. A term of every quote, so read it. */
+      routeFeeBps: () => readRouteFeeBpsInner(publicClient, addresses),
+      /** Whether the router is accepting trades at all. */
+      paused: () => readVenuePausedInner(publicClient, addresses),
+      /** Check a venue against the allowlist before a trader signs, not as a revert. */
+      routable: (query: VenueAllowlistQuery) =>
+        readVenueRoutableInner(publicClient, addresses, query),
+      /** The one plain ERC-20 approval a venue trade needs, or null for a native buy. */
+      prepareApproval: (asset: Address | null, amount: bigint) =>
+        venueApprovalForInner(addresses, asset, amount),
+      prepareSwapV3: (pool: Address, params: PrepareVenueSwapPoolParams) =>
+        prepareVenueSwapV3Inner(addresses, pool, params),
+      prepareSwapV2: (pair: Address, params: PrepareVenueSwapPoolParams) =>
+        prepareVenueSwapV2Inner(addresses, pair, params),
+      prepareSwapCurve: (resolver: Address, params: PrepareVenueSwapCurveParams) =>
+        prepareVenueSwapCurveInner(addresses, resolver, params),
+      prepareSwapV4: (params: PrepareVenueSwapV4Params) =>
+        prepareVenueSwapV4Inner(addresses, params),
+      /**
+       * Send a prepared venue trade and wait for it to be mined. Approve first with
+       * {prepareApproval} where the input is an ERC-20; this deliberately does not
+       * approve on the caller's behalf, because the amount that needs approving is the
+       * router's PULL ceiling and only the caller knows whether the trade is exact-out.
+       */
+      async send(request: TxRequest) {
+        requireWallet();
+        return send(request);
+      },
     },
 
     /** Unsigned `claimReferralFees(quote)` on the current hook, or on `hook`. Pays whoever signs it. */

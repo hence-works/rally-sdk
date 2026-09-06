@@ -23,6 +23,11 @@ export type RallyErrorCode =
   | "INSUFFICIENT_BALANCE"
   | "NO_ETH_ROUTE"
   | "BAD_ETH_ROUTE"
+  // The universal router will not fill this venue: its pool manager, factory, hook or
+  // resolver is not on the router's allowlist. Distinct from UNSUPPORTED because it is a
+  // fact about one venue on one chain rather than about the SDK, and it can change
+  // without a release.
+  | "VENUE_NOT_ROUTABLE"
   | "UNSUPPORTED";
 
 export class RallyError extends Error {
