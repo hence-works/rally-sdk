@@ -27,24 +27,6 @@ export interface RallyAddresses {
   /** Absent on chains deployed before the creation path split out of the hook. */
   rallyFactory?: Address;
   rallyRouter: Address;
-  /**
-   * The entrypoint for trading a coin launched on a THIRD-PARTY launchpad we list, where
-   * `rallyRouter` above serves only coins launched here. Absent on a chain that lists no
-   * external venue.
-   *
-   * Chain level and not per generation: it is a proxy whose address never changes, and it
-   * is periphery that no hook points at, so a launch generation rotating leaves it alone.
-   *
-   * Which venues it will fill is an on-chain allowlist rather than an address here, and a
-   * coin whose venue was never allowlisted is unroutable rather than mis-routed.
-   */
-  universalRouter?: Address;
-  /**
-   * Resolves a Pons v2 coin to the per-coin bonding curve that fills it, for the universal
-   * router's curve path. Pons specific by construction: a venue that launches straight into
-   * a pool has a venue hook on the router but no curve and therefore no resolver.
-   */
-  ponsV2CurveResolver?: Address;
   dividendDistributor?: Address;
   /**
    * Where the hook sends the platform's fee cut. Absent on a chain deployed against a bare
@@ -535,35 +517,3 @@ export type LaunchStep =
   | "confirming";
 
 export type SwapStep = "quoting" | "approving" | "signing" | "confirming";
-
-/**
- * How a third-party venue settles, which decides which router entrypoint fills it.
- *
- * `UNIV3`      the launch opens a Uniswap v3 fork pool and the coin is tradeable from its
- *              first block. One pinned pair token per venue.
- * `UNIV4`      a per-coin bonding curve that graduates into a hooked v4 pool. A coin here
- *              is on ONE of the two depending on whether it has graduated yet, so both
- *              paths have to be tried.
- * `DOPPLER_V4` opens a hooked v4 pool with real liquidity in the launch block and never
- *              migrates. No curve stage exists, so the v4 path is the only one.
- */
-export type VenueDex = "UNIV3" | "UNIV4" | "DOPPLER_V4";
-
-/** A third-party launchpad we list, as baked in from apps/indexer/src/externalVenues.json. */
-export interface ExternalVenue {
-  /** Stable tag, matching the indexer's `Venue` enum. */
-  venue: string;
-  dex: VenueDex;
-  /** The launchpad's own factory. Identity, not a trade path. */
-  factory: Address;
-  /** UNIV3 only: the DEX factory its pools are deployed by, which `getPool` is called on. */
-  dexFactory?: Address;
-  /** UNIV3 only: the single quote every launch on this venue is paired against. */
-  pairToken?: Address;
-  pairDecimals?: number;
-  /**
-   * v4 venues only: the hook stamped on every pool the venue opens. A coin's pool id is
-   * derived from it, so this is what makes a v4 venue discoverable without an indexer.
-   */
-  memeHook?: Address;
-}

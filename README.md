@@ -20,23 +20,14 @@ runtimes.
 ## Quick start
 
 ```ts
-import {
-  createPublicClient,
-  createWalletClient,
-  custom,
-  http,
-  parseEther,
-} from "viem";
+import { createPublicClient, createWalletClient, custom, http, parseEther } from "viem";
 import { sepolia } from "viem/chains";
 import { createRallyClient } from "@rally-fun/sdk";
 
 const rally = createRallyClient({
   chainId: 11155111,
   publicClient: createPublicClient({ chain: sepolia, transport: http() }),
-  walletClient: createWalletClient({
-    chain: sepolia,
-    transport: custom(window.ethereum),
-  }),
+  walletClient: createWalletClient({ chain: sepolia, transport: custom(window.ethereum) }),
 });
 
 // Launch a coin. Mines the salt, pins nothing (you host the JSON), sends the tx.
@@ -49,17 +40,10 @@ const { token, pid } = await rally.launch({
 });
 
 // Price a trade, then take it.
-const quote = await rally.quote(token, {
-  side: "buy",
-  amountIn: parseEther("0.1"),
-});
+const quote = await rally.quote(token, { side: "buy", amountIn: parseEther("0.1") });
 console.log(quote.amountOut, quote.feeBps, quote.minAmountOut);
 
-await rally.swap(token, {
-  side: "buy",
-  amountIn: parseEther("0.1"),
-  payWithEth: true,
-});
+await rally.swap(token, { side: "buy", amountIn: parseEther("0.1"), payWithEth: true });
 ```
 
 ## Two ways to sign
@@ -71,11 +55,11 @@ keep their own submission path:
 ```ts
 const prepared = await rally.prepareLaunch({ name, symbol, metadataURI });
 
-prepared.token; // the CREATE2 address the coin will land at, known before signing
-prepared.pid; // the v4 PoolId it will be keyed by, derived locally
-prepared.totalCost; // launchFee + initialBuy, in the quote's base units
+prepared.token;    // the CREATE2 address the coin will land at, known before signing
+prepared.pid;      // the v4 PoolId it will be keyed by, derived locally
+prepared.totalCost;// launchFee + initialBuy, in the quote's base units
 prepared.approval; // an ERC-20 approve, when the funding path needs one
-prepared.request; // { to, data, value, chainId } — send it however you like
+prepared.request;  // { to, data, value, chainId } — send it however you like
 
 await myEthersSigner.sendTransaction(prepared.request);
 ```
@@ -91,10 +75,9 @@ way. Reads never need a wallet at all.
 const result = await rally.launch({
   name: "Good Dog",
   symbol: "WOOF",
-  quote: "WETH", // or "USDC", or any allowlisted quote address
-  initialBuy: parseEther("0.05"), // optional fee-exempt creator first buy
-  fees: {
-    // optional §6.1 split; omit for governance defaults
+  quote: "WETH",              // or "USDC", or any allowlisted quote address
+  initialBuy: parseEther("0.05"),   // optional fee-exempt creator first buy
+  fees: {                     // optional §6.1 split; omit for governance defaults
     creatorBps: 5_000,
     dividendBps: 5_000,
     buybackBps: 0,
@@ -104,16 +87,16 @@ const result = await rally.launch({
   onStep: (step) => console.log(step), // resolving → mining → approving → signing → confirming
 });
 
-result.token; // the deployed ERC-20 (18dp, always)
-result.pid; // v4 PoolId
-result.gradThreshold; // B, in the quote's base units
-result.firstBuyTokens; // what `initialBuy` actually bought, if any
+result.token;           // the deployed ERC-20 (18dp, always)
+result.pid;             // v4 PoolId
+result.gradThreshold;   // B, in the quote's base units
+result.firstBuyTokens;  // what `initialBuy` actually bought, if any
 ```
 
 Four things worth knowing, because they constrain the order of operations:
 
 - **The token address is mined, not assigned.** A launch token must sort BELOW its quote
-  (so it is always `currency0`), so the SDK grinds a CREATE2 salt first. That salt is _creator-bound_ — its high 20 bytes must equal the sending
+  (so it is always `currency0`), so the SDK grinds a CREATE2 salt first. That salt is *creator-bound* — its high 20 bytes must equal the sending
   account — so the address commits to its creator and can't be front-run off public
   calldata.
 - **Metadata comes after the address, never before.** The URI is frozen onto the token
@@ -122,7 +105,7 @@ Four things worth knowing, because they constrain the order of operations:
 - **The launch fee is per-quote and governance-tunable.** A wETH launch and a USDC
   launch cost different amounts in different decimals. The SDK reads `quotes(quote)`
   rather than assuming.
-- **Fees are split, not owned.** `fees` partitions the _post-platform_ remainder across
+- **Fees are split, not owned.** `fees` partitions the *post-platform* remainder across
   creator / dividend / buyback / lp-support and must sum to 10000. The platform's cut
   is taken off the top by governance and deliberately isn't expressible here.
 
@@ -202,10 +185,10 @@ a pattern sorting above a quote made every launch on that quote impossible.
 import { mineSalt } from "@rally-fun/sdk";
 
 const { salt, address, attempts } = await mineSalt({
-  deployer: rally.addresses.launchLib, // the CREATE2 `from` — NOT the factory
+  deployer: rally.addresses.launchLib,   // the CREATE2 `from` — NOT the factory
   creator: myAddress,
   initCodeHash,
-  quote: quoteAddress, // REQUIRED: the address must sort below it
+  quote: quoteAddress,                   // REQUIRED: the address must sort below it
   onProgress: (n) => setProgress(n),
   signal: controller.signal,
 });
@@ -216,8 +199,7 @@ worker count; pass a pre-mined `salt` to `prepareLaunch` to skip the grind.
 s
 const launch = await rally.getLaunch(token);
 // → phase, bonded/gradThreshold, poolPriceWad, reserves, feeSplit, poolKey, pid
-
-````
+```
 
 `getLaunch` takes only a token address. It derives the candidate PoolId for each known
 quote (and each hook generation, see below) locally and asks the hook which one exists,
@@ -232,11 +214,11 @@ q.slippageBps;        // 100 when exact, 500 when approximate
 q.feeBps;             // live anti-snipe fee — decays 25% → 1% over ~10 minutes
 q.crossesGraduation;  // true when this buy graduates the launch mid-swap
 q.exact;              // whether the estimate reproduces the on-chain math exactly
-````
+```
 
 Two Rally-specific hazards drive that bound, and neither exists on a plain AMM: the
 anti-snipe fee decays continuously, so a quote is only valid for the fee at execution
-time; and a buy large enough to bond `b` to `B` graduates the launch _inside the swap_
+time; and a buy large enough to bond `b` to `B` graduates the launch *inside the swap*
 and pays its remainder against a pool that didn't exist when you quoted. A non-crossing
 curve trade is priced exactly and bounded at 1%; a crossing buy or a graduated pool is
 an approximation and gets 5%. Override with `slippageBps` or `minAmountOut`.
@@ -263,12 +245,12 @@ transaction:
 ```ts
 const q = await rally.quoteExactOut(token, {
   side: "buy",
-  amountOut: 1_000_000n * 10n ** 18n, // buy exactly 1M tokens
+  amountOut: 1_000_000n * 10n ** 18n,   // buy exactly 1M tokens
 });
 
-q.amountIn; // estimated cost, in the input leg's base units
-q.maxAmountIn; // the ceiling the swap will submit as `amountLimit`
-q.slippageBps; // tolerance applied to reach it
+q.amountIn;      // estimated cost, in the input leg's base units
+q.maxAmountIn;   // the ceiling the swap will submit as `amountLimit`
+q.slippageBps;   // tolerance applied to reach it
 
 await rally.swapExactOut(token, {
   side: "buy",
@@ -311,7 +293,7 @@ straight into the curve:
 ```ts
 await rally.ethBuy(token, {
   amountIn: parseEther("0.25"),
-  minAmountOut, // required — the only bound across both legs
+  minAmountOut,          // required — the only bound across both legs
   // v3Pool: "0x…"       // defaults to the SDK's known wETH/quote route for the chain
 });
 ```
@@ -342,7 +324,7 @@ The SDK handles this for you:
   indexer's `Launch.hookAddress`), pass it and only that hook is probed:
 
   ```ts
-  await rally.getLaunch(token, { hook }); // known generation: router, registry fill in
+  await rally.getLaunch(token, { hook });                    // known generation: router, registry fill in
   await rally.swap(token, { side: "buy", amountIn }, { hook });
   await rally.getLaunch(token, { hook, router, paramRegistry }); // a hook newer than this SDK
   ```
@@ -351,7 +333,6 @@ The SDK handles this for you:
   single hook, so it cannot be guessed. Pass its `paramRegistry` too (the indexer's
   `Launch.registryAddress`), or the current registry is assumed. Every trade method
   takes the same optional trailing `generation`.
-
 - **Launching always uses the current generation.** `prepareLaunch`, `launch` and
   `predictToken` target the top-level `launchHook` / `rallyFactory` and nothing else.
 - **Referral balances are per hook.** `referralFees(quote)` and `claimReferralFees(quote)`
@@ -372,11 +353,11 @@ of the platform's cut of that trade's fee:
 await rally.swap(token, {
   side: "buy",
   amountIn: parseEther("0.1"),
-  referrer: "0xYourVenue…", // your payout address
+  referrer: "0xYourVenue…",   // your payout address
 });
 
-await rally.referralFees(quote); // unclaimed, in that quote's base units
-await rally.claimReferralFees(quote); // pays your wallet; prepareClaimReferralFees for unsigned
+await rally.referralFees(quote);            // unclaimed, in that quote's base units
+await rally.claimReferralFees(quote);       // pays your wallet; prepareClaimReferralFees for unsigned
 ```
 
 **It costs the trader nothing.** The referral comes out of the protocol's own revenue, not
@@ -410,7 +391,7 @@ Rally's coins; the universal router is refused them, because Rally's hook is del
 left off its venue allowlist. Route by which venue launched the coin.
 
 ```ts
-const feeBps = await rally.venue.routeFeeBps(); // read it, do not hardcode
+const feeBps = await rally.venue.routeFeeBps();     // read it, do not hardcode
 
 // Check the venue before your user signs, not as a revert.
 const { routable, reasons } = await rally.venue.routable({ v3Factory });
@@ -421,13 +402,11 @@ const poolIn = netOfRouteFee(budget, feeBps);
 const out = await yourQuoter(poolIn);
 
 const tx = rally.venue.prepareSwapV3(pool, {
-  token,
-  buy: true,
-  exactIn: true,
-  amount: budget, // what the trader pays, fee included
+  token, buy: true, exactIn: true,
+  amount: budget,                       // what the trader pays, fee included
   amountLimit: applySlippage(out, 100n), // FLOOR when exact-in
   deadline: await rally.chainDeadline(),
-  value: budget, // native input: must EQUAL the budget
+  value: budget,                        // native input: must EQUAL the budget
 });
 await rally.venue.send(tx);
 ```
@@ -448,7 +427,7 @@ sell the router's `amount` is what the venue must produce, so pass
 
 **Approvals are one plain ERC-20 allowance** to the router, via
 `rally.venue.prepareApproval(asset, amount)`. No Permit2 and no second leg. Size it to
-what the router may _pull_, which on an exact-output trade is the ceiling, not the
+what the router may *pull*, which on an exact-output trade is the ceiling, not the
 estimate. A buy paying in native ETH approves nothing and attaches `value` instead, and
 the router requires `msg.value` to **equal** the budget rather than merely cover it,
 refunding whatever the fill leaves.
@@ -476,11 +455,7 @@ Anything unbundled — a local anvil deploy, a chain newer than your installed v
 is an override away:
 
 ```ts
-createRallyClient({
-  chainId: 31337,
-  publicClient,
-  addresses: { rallyFactory, launchHook /* … */ },
-});
+createRallyClient({ chainId: 31337, publicClient, addresses: { rallyFactory, launchHook, /* … */ } });
 ```
 
 ## Reading governance
@@ -489,9 +464,9 @@ Fees and thresholds are timelock-governable. Don't hardcode them; read them, and
 governance change re-flows on its own. The client caches these for 60s.
 
 ```ts
-await rally.getCurveParams(); // supply, curve allocation, fee decay, pool fee
-await rally.getFeePolicy(); // platform cut, creator cap, enabled mechanisms
-await rally.listQuotes(); // allowlisted quotes with their fee + B + decimals
+await rally.getCurveParams();   // supply, curve allocation, fee decay, pool fee
+await rally.getFeePolicy();     // platform cut, creator cap, enabled mechanisms
+await rally.listQuotes();       // allowlisted quotes with their fee + B + decimals
 ```
 
 ## Errors
@@ -504,9 +479,7 @@ branch without matching on message text. The original failure is preserved in `c
 import { isRallyError } from "@rally-fun/sdk";
 
 try {
-  await rally.launch({
-    /* … */
-  });
+  await rally.launch({ /* … */ });
 } catch (err) {
   if (isRallyError(err) && err.code === "INVALID_FEE_SPLIT") showFeeEditor();
   else throw err;
