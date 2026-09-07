@@ -414,6 +414,12 @@ export const rallyUniversalRouterAbi = parseAbi([
   // exposes no exact-output form for one.
   "function swapCurve(address resolver, address token, bool buy, uint256 amountIn, uint256 minOut, bool unwrapOut, uint256 deadline) payable returns (uint256 received)",
   "function swapV4(address v4Manager, (address currency0, address currency1, uint24 fee, int24 tickSpacing, address hooks) key, address token, (bool zeroForOne, int256 amountSpecified, uint160 sqrtPriceLimitX96) params, uint256 amountLimit, bool unwrapOut, uint256 deadline) payable returns (uint256 spent, uint256 received)",
+  // One conversion hop, then the coin's own venue. Exact input only, both directions,
+  // and `minOut` is the single end-to-end bound (there is no per-leg one). `kind` is a
+  // `VenueKind` ORDINAL, which is append-only on the Solidity side: see VENUE_KINDS in
+  // `./venue`. Both legs carry all four fields even where a shape does not use them, so
+  // build them with the `routeLeg*` helpers rather than by hand.
+  "function swapRoute(((uint8 kind, address venue, address manager, (address currency0, address currency1, uint24 fee, int24 tickSpacing, address hooks) key) hop, (uint8 kind, address venue, address manager, (address currency0, address currency1, uint24 fee, int24 tickSpacing, address hooks) key) coin, address token, bool buy, uint256 amountIn, uint256 minOut, bool unwrapOut, uint256 deadline) req) payable returns (uint256 spent, uint256 received)",
   // Owner-settable up to a compile-time 25, so read it rather than hardcoding: it is a
   // term of every quote on this router.
   "function routeFeeBps() view returns (uint16)",
@@ -428,4 +434,13 @@ export const rallyUniversalRouterAbi = parseAbi([
   // `quoteAmount` INCLUDES the route fee on a buy and EXCLUDES it on a sell, which is
   // why the fee is carried separately rather than inferred from the two amounts.
   "event RallyRouted(address indexed trader, address indexed token, address indexed venue, bytes32 poolId, address quote, bool buy, uint256 quoteAmount, uint256 tokenAmount, uint256 fee)",
+  // The trader-facing half of a `swapRoute` fill, emitted immediately after that fill's
+  // `RallyRouted` and never on a direct swap. Two events because they answer two
+  // questions and only one is about the coin: `RallyRouted` is the FILL, priced in the
+  // intermediate the coin actually crossed, and this is the TRADE, in the assets the
+  // trader brought and took away (zero is native ETH, an unwrapped wETH leg included).
+  // `routeFee` is in units of the asset the trader routed in from, never the coin and
+  // never the intermediate. Do not fold the two together: a coin's volume would then
+  // depend on which asset each trader happened to arrive in.
+  "event RallyRouteFilled(address indexed trader, address indexed token, address indexed assetIn, address assetOut, address hopVenue, uint256 amountIn, uint256 amountOut, uint256 routeFee)",
 ]);

@@ -32,6 +32,7 @@ import {
 import { cleanMetadata, createRallyPinner, type MetadataConfig, type MetadataPinner } from "./metadata";
 import {
   prepareVenueSwapCurve as prepareVenueSwapCurveInner,
+  prepareVenueSwapRoute as prepareVenueSwapRouteInner,
   prepareVenueSwapV2 as prepareVenueSwapV2Inner,
   prepareVenueSwapV3 as prepareVenueSwapV3Inner,
   prepareVenueSwapV4 as prepareVenueSwapV4Inner,
@@ -41,6 +42,7 @@ import {
   venueApprovalFor as venueApprovalForInner,
   type PrepareVenueSwapCurveParams,
   type PrepareVenueSwapPoolParams,
+  type PrepareVenueSwapRouteParams,
   type PrepareVenueSwapV4Params,
   type VenueAllowlistQuery,
 } from "./venue";
@@ -602,6 +604,26 @@ export function createRallyClient(config: RallyClientConfig) {
         prepareVenueSwapCurveInner(addresses, resolver, params),
       prepareSwapV4: (params: PrepareVenueSwapV4Params) =>
         prepareVenueSwapV4Inner(addresses, params),
+      /**
+       * Unsigned `swapRoute`: one conversion hop, then the coin's own venue, for a coin
+       * whose quote the trader does not hold (on Robinhood, routinely a tokenized stock).
+       *
+       * Exact input only. `minOut` is end-to-end and AFTER the route fee, which is charged
+       * once at the boundary in the asset the trader routed in from, never in the
+       * intermediate. Build the two legs with `routeLegV3` / `routeLegV2` / `routeLegV4` /
+       * `routeLegCurve`, and pin the hop pool from your own depth-filtered data rather
+       * than discovering it. See `src/venue.ts`.
+       */
+      prepareSwapRoute: (params: PrepareVenueSwapRouteParams) =>
+        prepareVenueSwapRouteInner(addresses, params),
+      /**
+       * {prepareSwapRoute}, signed and mined. Approve `amountIn` of the routed-in asset to
+       * the router first with {prepareApproval}, or attach `value` for a native input.
+       */
+      async swapRoute(params: PrepareVenueSwapRouteParams) {
+        requireWallet();
+        return send(prepareVenueSwapRouteInner(addresses, params));
+      },
       /**
        * Send a prepared venue trade and wait for it to be mined. Approve first with
        * {prepareApproval} where the input is an ERC-20; this deliberately does not

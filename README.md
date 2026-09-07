@@ -414,7 +414,8 @@ await rally.venue.send(tx);
 Four entrypoints, one per settlement shape: `prepareSwapV3` (pass the **pool**, not a
 path), `prepareSwapV2`, `prepareSwapCurve` (pass the venue's **resolver**, never a curve
 address) and `prepareSwapV4`. Each has the unsigned form shown above; `rally.venue.send`
-submits one if you would rather not.
+submits one if you would rather not. A fifth, `prepareSwapRoute`, fills a coin for a
+trader who does not hold its quote at all (below).
 
 **The route fee is a term of every quote.** Rally charges bps of the quote crossing the
 trader's wallet and always takes it by subtraction: on a buy the venue is handed
@@ -432,9 +433,63 @@ estimate. A buy paying in native ETH approves nothing and attaches `value` inste
 the router requires `msg.value` to **equal** the budget rather than merely cover it,
 refunding whatever the fill leaves.
 
+### Coins whose quote your user does not hold
+
+A coin's quote is whatever its launcher picked, and on Robinhood that is routinely a
+tokenized stock. The four entrypoints above can only fill such a coin for someone who
+*already holds* that stock, so it ends up listed, priced and rendered for an audience that
+cannot buy it. `prepareSwapRoute` is the other shape: **one conversion hop, then the
+coin's own venue**, in one transaction and against one end-to-end bound.
+
+```ts
+import { routeLegV3, routeLegV4 } from "@rally-fun/sdk";
+
+const tx = rally.venue.prepareSwapRoute({
+  hop: routeLegV4(manager, wethStockKey), // wETH → the coin's quote. PINNED, see below.
+  coin: routeLegV3(pool),                 // the coin's own venue, proved as ever
+  token,
+  buy: true,
+  amountIn: budget,                       // exact input, route fee included
+  minOut,                                 // end-to-end, AFTER the fee
+  deadline: await rally.chainDeadline(),
+  value: budget,                          // native input: must EQUAL amountIn
+});
+await rally.venue.send(tx);               // or rally.venue.swapRoute({…}) in one call
+```
+
+Build each leg with `routeLegV3` / `routeLegV2` / `routeLegV4` / `routeLegCurve`. One ABI
+tuple covers all four shapes, so a leg carries a zeroed `manager` and `key` even where it
+does not use them, and the helpers are what keep that from being a hand-encoding error.
+`VENUE_KINDS` holds the ordinals, which are append-only. A curve is legal as the `coin`
+leg only: it has no second quote to convert into, so naming one as the hop reverts.
+
+Four things to get right:
+
+- **Exact input only**, in both directions. There is no exact-output form.
+- **`minOut` is end-to-end and post-fee**, in the asset your user actually receives. It is
+  the only bound a route has; there is no per-leg one.
+- **The fee is charged once, at the boundary, in the asset the trader routed in from**,
+  never in the intermediate. A buy is skimmed before either venue sees it, so the trader
+  spends exactly the figure they typed; a sell has it deducted from the output.
+- **You do not name the intermediate**, or your user's own asset. The coin leg names the
+  intermediate and the hop's far side falls out of the proved pool, so a route cannot
+  claim a conversion it did not make.
+
+**Do not discover the hop pool.** Robinhood carries dozens of empty `<stock>/<stable>` v4
+pools per tokenized stock, one of them pricing SPCX at 3.4e50. Pick the hop from pinned or
+depth-filtered data and keep `minOut` as the backstop, not as the filter.
+
+A routed fill emits **two** events: `RallyRouted`, the fill priced in the coin's own quote
+with its `fee` always zero, and `RallyRouteFilled` immediately after, the trade in the
+assets that actually crossed the wallet. They answer different questions and only the
+first is about the coin, so existing `RallyRouted` handling needs no change to count
+routed fills correctly.
+
 This SDK does **not** quote these venues. They are third-party contracts and their
 pricing is theirs, so pricing them here would be a promise about somebody else's contract
 that we could not keep across their next redeploy. Quote the venue yourself and convert.
+A route means quoting both legs: the hop on `netOfRouteFee(amountIn, feeBps)`, then the
+coin's venue on what the hop returns.
 
 `rallyUniversalRouter` is absent on a chain with no external venues, which is the signal
 that aggregated trading is off there rather than an error; the helpers throw

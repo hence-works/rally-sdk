@@ -195,23 +195,33 @@ export type {
 // contract from `rallyRouter` with different rules: it will not fill a Rally coin, and
 // Rally's router will not fill a foreign one.
 export {
+  VENUE_KINDS,
   grossForNetRouteFee,
   netOfRouteFee,
   prepareVenueSwapCurve,
+  prepareVenueSwapRoute,
   prepareVenueSwapV2,
   prepareVenueSwapV3,
   prepareVenueSwapV4,
   readRouteFeeBps,
   readVenuePaused,
   readVenueRoutable,
+  routeLegCurve,
+  routeLegV2,
+  routeLegV3,
+  routeLegV4,
   venueApprovalFor,
 } from "./venue";
 export type {
   PrepareVenueSwapCurveParams,
   PrepareVenueSwapPoolParams,
+  PrepareVenueSwapRouteParams,
   PrepareVenueSwapV4Params,
+  RouteLeg,
   VenueAllowlistQuery,
   VenueFill,
+  VenueKind,
+  VenueRouteFill,
 } from "./venue";
 
 // Metadata pinning

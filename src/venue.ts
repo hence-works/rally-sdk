@@ -33,10 +33,18 @@
  * (a v3 quoter, a v4 quoter, the curve's own reserves) and converts with the two
  * helpers here. Pricing a foreign venue inside a published SDK would be a promise about
  * somebody else's contract that we cannot keep across their next redeploy.
+ *
+ * ## Coins the trader cannot hold the quote for
+ *
+ * The four direct entrypoints fill a coin only for someone who ALREADY HOLDS its quote,
+ * and a coin's quote is whatever its launcher picked (on Robinhood, routinely a
+ * tokenized stock). {@link prepareVenueSwapRoute} is the other shape: one conversion
+ * hop, then the coin's own venue, in one transaction and against one end-to-end bound.
  */
 import { encodeFunctionData, type Address, type Hex } from "viem";
 import { readContract } from "viem/actions";
 import { rallyUniversalRouterAbi } from "./abis";
+import { ZERO_ADDRESS } from "./addresses";
 import { RallyError } from "./errors";
 import type { PoolKey } from "./pool";
 import type { PublicClientLike, RallyAddresses, TxRequest } from "./types";
@@ -427,6 +435,189 @@ export function prepareVenueSwapV4(
   };
 }
 
+// ──────────────── routed trades: a coin whose quote nobody holds ────────────────
+
+/**
+ * `RallyUniversalRouter.VenueKind` ordinals: which settlement shape fills one leg.
+ *
+ * APPEND-ONLY, for the same reason `REGISTRY_KEYS` is: the ordinal is what goes on the
+ * wire, so inserting a member silently re-points every live route builder at a
+ * different venue family. Never reorder, and never renumber.
+ */
+export const VENUE_KINDS = {
+  /** A v2-style pair. The leg's `venue` is the pair. */
+  V2: 0,
+  /** A v3-fork pool. The leg's `venue` is the pool itself, never a path. */
+  V3: 1,
+  /** A v4 pool. The leg's `manager` and `key` describe it; `venue` is unused. */
+  V4: 2,
+  /**
+   * A third-party bonding curve. The leg's `venue` is the allowlisted resolver, never a
+   * curve address, and it is legal ONLY on the coin leg: a curve prices one coin against
+   * one pair asset and has no second quote to convert into, so naming it as the hop
+   * reverts `BadHopVenue`.
+   */
+  CURVE: 3,
+} as const;
+
+export type VenueKind = (typeof VENUE_KINDS)[keyof typeof VENUE_KINDS];
+
+/**
+ * One venue in a route, named the way that venue is proved (`RallyUniversalRouter.Leg`).
+ *
+ * One struct covers all four shapes, so the ABI tuple carries every field even where the
+ * shape does not use it: a v3 leg still encodes a zeroed `manager` and `key`, and a
+ * missing field is an encoding error rather than a default. Build one with
+ * {@link routeLegV3}, {@link routeLegV2}, {@link routeLegV4} or {@link routeLegCurve}.
+ */
+export interface RouteLeg {
+  kind: VenueKind;
+  /** The v2 pair, the v3 pool, or a CURVE leg's resolver. Zero on a V4 leg. */
+  venue: Address;
+  /** V4 only: the singleton the pool lives on. Zero otherwise. */
+  manager: Address;
+  /** V4 only: the pool. Zeroed otherwise. */
+  key: PoolKey;
+}
+
+/** The zeroed `PoolKey` a non-v4 leg still has to encode. Fresh per leg, never shared. */
+function emptyKey(): PoolKey {
+  return {
+    currency0: ZERO_ADDRESS,
+    currency1: ZERO_ADDRESS,
+    fee: 0,
+    tickSpacing: 0,
+    hooks: ZERO_ADDRESS,
+  };
+}
+
+/** A v3-fork leg. `pool` is the pool, proved through its own factory's `getPool`. */
+export function routeLegV3(pool: Address): RouteLeg {
+  return { kind: VENUE_KINDS.V3, venue: pool, manager: ZERO_ADDRESS, key: emptyKey() };
+}
+
+/** A v2-style leg. `pair` is the pair; the router knows each fork's fee from its factory. */
+export function routeLegV2(pair: Address): RouteLeg {
+  return { kind: VENUE_KINDS.V2, venue: pair, manager: ZERO_ADDRESS, key: emptyKey() };
+}
+
+/**
+ * A v4 leg on `manager`, for pool `key`.
+ *
+ * The one asymmetry in a route: a v4 HOP may be hookless, a v4 COIN leg may not. The
+ * venue-hook pin protects fill attribution, which a hop does not have, and every real
+ * wETH/stock and stable/stock pool on Robinhood is hookless, so requiring a hook there
+ * would have excluded every hop worth making.
+ */
+export function routeLegV4(manager: Address, key: PoolKey): RouteLeg {
+  return { kind: VENUE_KINDS.V4, venue: ZERO_ADDRESS, manager, key };
+}
+
+/**
+ * A third-party bonding-curve leg, by RESOLVER. Legal only as the `coin` leg.
+ *
+ * Same money control as {@link prepareVenueSwapCurve}: a caller free to name an
+ * arbitrary "curve" could mint routed volume out of a contract they wrote themselves.
+ */
+export function routeLegCurve(resolver: Address): RouteLeg {
+  return { kind: VENUE_KINDS.CURVE, venue: resolver, manager: ZERO_ADDRESS, key: emptyKey() };
+}
+
+/** {@link prepareVenueSwapRoute} parameters. Exact-in only, in both directions. */
+export interface PrepareVenueSwapRouteParams extends Omit<VenueSwapCommon, "amountLimit"> {
+  /**
+   * The conversion leg. Its far side, whichever of its two assets is NOT the coin's
+   * quote, is what the trader brings on a buy and takes away on a sell.
+   *
+   * DO NOT DISCOVER THIS POOL. Robinhood carries dozens of empty `<stock>/<stable>` v4
+   * pools per tokenized stock, one of them pricing SPCX at 3.4e50, and picking a hop by
+   * "a pool exists for this pair" walks a trade straight into one. The hop belongs to
+   * pinned or depth-filtered data, with `minOut` as the backstop and not as the filter.
+   */
+  hop: RouteLeg;
+  /** The coin's own venue, proved exactly as a direct fill proves it, hook pin included. */
+  coin: RouteLeg;
+  /** True to spend the routed-in asset on the coin, false to sell the coin back out to it. */
+  buy: boolean;
+  /** The exact input: the routed-in asset's base units on a buy, the coin's on a sell. */
+  amountIn: bigint;
+  /**
+   * Floor on what reaches the trader, AFTER the route fee, end to end. The only bound a
+   * route has: there is no per-leg one, deliberately, because a per-leg bound can be
+   * satisfied twice and still deliver a bad fill.
+   *
+   * Never pass `0` meaning "no opinion": that is an unbounded market order across two
+   * third-party venues.
+   */
+  minOut: bigint;
+}
+
+/**
+ * Trade a coin through an intermediate the trader does not have to hold: one conversion
+ * hop, then the coin's own venue, in one transaction.
+ *
+ * What a caller names is the hop pool, the coin's venue, the coin and the direction, and
+ * that is all. **Neither the intermediate nor the trader's own asset is named**: the coin
+ * leg names the intermediate (the coin's quote) and the hop's far side falls out of the
+ * proved pool, so a route cannot claim to have converted something it did not. It follows
+ * that both legs must actually meet, and a hop whose far side IS the coin reverts
+ * `RouteIsCircular`.
+ *
+ * **Exact input only, both directions.** There is no exact-output form and there will not
+ * be one: sizing a hop from the coin leg's realised input needs nested venue callbacks.
+ * The single-hop entrypoints keep their exact-output mode.
+ *
+ * **The route fee is charged once, at the boundary, in the asset the trader ROUTED IN
+ * FROM**, never in the intermediate. On a buy it is skimmed off the input before either
+ * venue sees it, so the trader spends exactly the figure they typed; on a sell it is
+ * deducted from the output. So `netOfRouteFee(amountIn, feeBps)` is what the hop is
+ * handed on a buy, and a sell's proceeds are net of the fee on the far side.
+ *
+ * **`minOut` is end-to-end and post-fee**, in the asset the trader receives: the coin on a
+ * buy, the routed-in asset on a sell.
+ *
+ * ETH follows the direct paths: attach `value` EQUAL to `amountIn` when the routed-in
+ * asset is native or wETH, and `unwrapOut` (default true) delivers a wETH output leg as
+ * native ETH. Everything else needs one plain ERC-20 approval to the router, sized to
+ * `amountIn`, via {@link venueApprovalFor}.
+ */
+export function prepareVenueSwapRoute(
+  addresses: RallyAddresses,
+  params: PrepareVenueSwapRouteParams,
+): TxRequest {
+  requirePositive(params.amountIn, "amountIn");
+  if (params.hop.kind === VENUE_KINDS.CURVE) {
+    throw new RallyError(
+      "VENUE_NOT_ROUTABLE",
+      "A bonding curve cannot be a route's conversion hop: it prices one coin against one " +
+        "pair asset and has no second quote to convert into. The router reverts " +
+        "`BadHopVenue`. A curve is legal as the `coin` leg only.",
+      { details: { hop: params.hop.venue } },
+    );
+  }
+  return {
+    to: requireRouter(addresses),
+    data: encodeFunctionData({
+      abi: rallyUniversalRouterAbi,
+      functionName: "swapRoute",
+      args: [
+        {
+          hop: params.hop,
+          coin: params.coin,
+          token: params.token,
+          buy: params.buy,
+          amountIn: params.amountIn,
+          minOut: params.minOut,
+          unwrapOut: params.unwrapOut ?? true,
+          deadline: params.deadline,
+        },
+      ],
+    }),
+    value: params.value ?? 0n,
+    chainId: addresses.chainId,
+  };
+}
+
 /**
  * The ERC-20 approval a venue trade needs, or `null` when it needs none.
  *
@@ -481,4 +672,37 @@ export interface VenueFill {
   tokenAmount: bigint;
   /** Rally's cut, in the quote's base units. Carried, not inferable from the amounts. */
   fee: bigint;
+}
+
+/**
+ * Decoded `RallyRouteFilled`: the trader-facing half of a {@link prepareVenueSwapRoute}
+ * fill, emitted immediately after that fill's `RallyRouted` and never on a direct swap.
+ *
+ * The pair answers two different questions and only one of them is about the coin. The
+ * `RallyRouted` beside this one is the FILL, priced in the intermediate that actually
+ * crossed the coin's venue with its `fee` always zero, and it needs no special handling:
+ * a reader that only knows about direct swaps already prices a routed fill correctly.
+ * This is the TRADE. Keep them apart, or a coin's volume starts depending on which asset
+ * each trader happened to arrive in, which is a property of the trader and not the coin.
+ */
+export interface VenueRouteFill {
+  trader: Address;
+  /** The coin, which is what joins this to the `RallyRouted` beside it. */
+  token: Address;
+  /** What left the trader's wallet. Zero is native ETH, **a buy funded with `value`
+   *  included**: the router wraps on the trader's behalf, so wETH there is the venue's
+   *  asset and never theirs. Fold ETH and wETH together yourself if you want one bucket;
+   *  they are reported apart because they are different balances leaving the wallet. */
+  assetIn: Address;
+  /** What reached it. Zero is native ETH, an unwrapped wETH leg included. */
+  assetOut: Address;
+  /** What filled the conversion leg: the pair, the pool, or the v4 singleton. */
+  hopVenue: Address;
+  /** Trader perspective, route fee INCLUDED on a buy. */
+  amountIn: bigint;
+  /** Trader perspective, route fee ALREADY DEDUCTED on a sell. */
+  amountOut: bigint;
+  /** Rally's cut, in units of the asset the trader routed in from. Never the coin, never
+   *  the intermediate. */
+  routeFee: bigint;
 }
