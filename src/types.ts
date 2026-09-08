@@ -57,6 +57,17 @@ export interface RallyAddresses {
    */
   ponsV2CurveResolver?: Address;
   /**
+   * `RallyCappedGovernor`, where the ParamRegistry's governance role has been handed to
+   * one. Its presence is a machine-readable guarantee about the registry it governs:
+   * trading fees are bounded by constants in verified bytecode (`capOf`) and the four
+   * that decide what a trade costs can only ever fall (`isRatcheted`). Absent means a
+   * plain address holds the role, with neither bound.
+   *
+   * Scoped to a generation, never chain-wide: a governor governs ONE registry, and every
+   * generation ships its own. Read it off the generation a coin actually trades on.
+   */
+  cappedGovernor?: Address;
+  /**
    * Every PREVIOUS hook generation still live on this chain, newest first.
    *
    * A v4 hook address is part of every PoolKey, so a protocol redeploy cannot migrate
@@ -152,6 +163,8 @@ export interface V2Deployment {
   lens?: Address;
   rallyVault?: Address;
   dividendDistributor?: Address;
+  /** That generation's capped governor. See the chain-level field of the same name. */
+  cappedGovernor?: Address;
   deploymentBlock: number;
 }
 
@@ -185,6 +198,8 @@ export interface LegacyDeployment {
   dividendDistributor?: Address;
   /** That generation's gacha prize escrow, built against its vault and router. */
   gachaVault?: Address;
+  /** That generation's capped governor. See the chain-level field of the same name. */
+  cappedGovernor?: Address;
   /** Block that generation was deployed at, a `fromBlock` floor for scanning its logs. */
   deploymentBlock: number;
 }
@@ -236,6 +251,8 @@ export interface HookGeneration {
   rallyVault?: Address;
   dividendDistributor?: Address;
   gachaVault?: Address;
+  /** That generation's capped governor. See the chain-level field of the same name. */
+  cappedGovernor?: Address;
   deploymentBlock: number;
 }
 

@@ -3,7 +3,7 @@
  *
  * Addresses are baked into the published bundle (see `deployments.ts`, regenerated
  * from the monorepo manifests) because an npm consumer has no access to the private
- * `@rally/deployments` workspace. Anything missing or newer than this SDK version is
+ * deploy manifests. Anything missing or newer than this SDK version is
  * covered by the `addresses` override on `createRallyClient`.
  */
 import { isAddress, type Address } from "viem";
@@ -112,6 +112,7 @@ export function generationsOf(addresses: RallyAddresses): HookGeneration[] {
     rallyVault?: Address;
     dividendDistributor?: Address;
     gachaVault?: Address;
+    cappedGovernor?: Address;
     deploymentBlock?: number;
     protocolVersion?: 1 | 2;
   }> = [
@@ -130,6 +131,7 @@ export function generationsOf(addresses: RallyAddresses): HookGeneration[] {
       rallyVault: addresses.rallyVault,
       dividendDistributor: addresses.dividendDistributor,
       gachaVault: addresses.gachaVault,
+      cappedGovernor: addresses.cappedGovernor,
       deploymentBlock: addresses.deploymentBlock,
     },
     ...(addresses.legacyDeployments ?? []),
@@ -161,6 +163,7 @@ export function generationsOf(addresses: RallyAddresses): HookGeneration[] {
       rallyVault: usable(g.rallyVault) ? g.rallyVault : undefined,
       dividendDistributor: usable(g.dividendDistributor) ? g.dividendDistributor : undefined,
       gachaVault: usable(g.gachaVault) ? g.gachaVault : undefined,
+      cappedGovernor: usable(g.cappedGovernor) ? g.cappedGovernor : undefined,
       deploymentBlock: g.deploymentBlock ?? 0,
     });
   }
