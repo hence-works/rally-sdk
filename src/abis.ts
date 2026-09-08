@@ -257,6 +257,15 @@ export const rallyHookU4Abi = parseAbi([
   // contracts hold no registry, the factory does. That key is the v1 path, and the two
   // can hold different values.
   "function referralBps() view returns (uint16)",
+  // Whether the creator's payout waits for breakout (§5.5). Live and chain-wide, like
+  // `referralBps` beside it and unlike anything frozen per launch: governance flips it and
+  // every coin on this hook changes with it, in that block.
+  //
+  // While it is true, `claimCreatorFees` reverts `NotBrokenOut` on a bonding coin and the
+  // creator's share accrues behind the gate instead. `RallyLensU4.previewCreatorFees` is
+  // what has been earned either way, and `claimableCreatorFees` already applies this flag,
+  // so a host gating a claim button reads that rather than this.
+  "function creatorClaimEscrow() view returns (bool)",
   // The hook keeps no convenience getters at all. A v4 hook's address encodes its
   // permissions, so it can never be replaced without abandoning every pool it hosts, which
   // means it has to fit under EIP-170 permanently: getters are the cheapest thing to give
@@ -320,6 +329,23 @@ export const rallyLensU4Abi = parseAbi([
   "function activeFeeConfigOf(bytes32 pid) view returns ((uint16 creatorBps, uint16 dividendBps, uint16 buybackBps, uint16 lpSupportBps) config, bool armed)",
   "function feeScheduleOf(bytes32 pid) view returns ((uint16 curveFeeStartBps, uint16 curveFeeEndBps, uint32 curveFeeDecay, uint16 poolFeeBps, uint16 platformBps, uint16 creatorCapBps, uint16 breakoutCreatorCapBps))",
   "function quoteFeesOf(bytes32 pid) view returns ((uint256 creator, uint256 platform, uint256 dividend, uint256 buyback, uint256 lpSupport))",
+  // What a launch has EARNED for its creator: the realised bucket plus the leg the next
+  // collection would credit. Not the same as the stored bucket, which reads 0 on a coin
+  // with real fees still sitting uncollected on its positions.
+  //
+  // Earned is also not always payable. While the hook's `creatorClaimEscrow` is on (§5.5),
+  // `claimCreatorFees` pays nothing until the coin breaks out, and this keeps reporting
+  // the growing balance that breakout will release. Show it as what the coin has earned,
+  // and read `claimableCreatorFees` for what a claim would actually pay.
+  "function previewCreatorFees(bytes32 pid) view returns (uint256)",
+  // What `claimCreatorFees` would pay right now: the earned balance, or zero while the
+  // escrow is on and the coin is still on the curve. It applies the hook's LIVE switch, so
+  // the answer moves for every coin the moment governance flips it.
+  //
+  // Only on lenses deployed alongside a hook that has the escrow at all. An older
+  // generation's lens does not have the selector and the call reverts, which is the signal
+  // that `previewCreatorFees` is already the payable figure there.
+  "function claimableCreatorFees(bytes32 pid) view returns (uint256)",
   "function referralPendingOf(bytes32 pid) view returns (uint256)",
   "function curvePresetOf(bytes32 pid) view returns (uint8)",
   "function curveSupplyOf(bytes32 pid) view returns (uint256)",
