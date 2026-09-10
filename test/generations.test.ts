@@ -305,6 +305,35 @@ describe("generationsOf", () => {
     expect(legacy.launchLib).toBe(LAUNCHLIB_V2);
   });
 
+  it("lists a v2-only chain's single deployment once, keeping the v2 entry", () => {
+    // Arc, and every local anvil: the chain has never run v1, so the deploy script writes
+    // the v2 addresses into the top-level keys AS WELL as into `v2Deployments`. The
+    // top-level copy has no lens and reads as v1, so listing both would offer a
+    // mislabelled duplicate of the one real generation.
+    const LENS: Address = "0xEEee111122223333444455556666777788889999";
+    const gens = generationsOf({
+      ...CURRENT_ONLY,
+      v2Deployments: [
+        {
+          launchHook: HOOK_V2,
+          rallyFactory: FACTORY_V2,
+          rallyRouter: ROUTER_V2,
+          paramRegistry: REGISTRY_V2,
+          launchLib: LAUNCHLIB_V2,
+          lens: LENS,
+          deploymentBlock: 100,
+        },
+      ],
+    });
+    expect(gens).toHaveLength(1);
+    expect(gens[0]!.protocolVersion).toBe(2);
+    expect(gens[0]!.lens).toBe(LENS);
+    // And the coin-facing lookup answers with it, which is what gates every per-pool read.
+    expect(generationForHook({ ...CURRENT_ONLY, v2Deployments: [
+      { launchHook: HOOK_V2, rallyRouter: ROUTER_V2, lens: LENS, deploymentBlock: 100 },
+    ] }, HOOK_V2)?.lens).toBe(LENS);
+  });
+
   it("treats a zero money address as absent rather than a real contract", () => {
     const legacy = generationsOf({
       ...WITH_LEGACY_MONEY,

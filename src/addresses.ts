@@ -89,7 +89,8 @@ function usable(value: Address | undefined): value is Address {
  * under an earlier generation keep trading against that generation's hook and router.
  * `resolveLaunch` probes these in order to find which one a coin belongs to. Entries
  * missing a hook or router are dropped rather than probed, and a zero factory reads as
- * absent, matching `requireFactory`.
+ * absent, matching `requireFactory`. One hook appears once: a manifest that records the
+ * same deployment twice (see below) yields the richer entry, not two.
  *
  * Every generation ships its own `RallyParamRegistry` and `LaunchLib`. A legacy entry
  * written before the manifest carried them reads the current ones: the two were the same
@@ -137,8 +138,20 @@ export function generationsOf(addresses: RallyAddresses): HookGeneration[] {
     ...(addresses.legacyDeployments ?? []),
   ];
   const out: HookGeneration[] = [];
+  // ONE HOOK IS ONE GENERATION. A chain whose only deployment is v2 (Arc, and any local
+  // anvil) records the same addresses in the top-level keys and in `v2Deployments`, and
+  // the top-level copy carries no `lens` and reads as v1 by construction. Emitting both
+  // shadows the real entry with a mislabelled duplicate of itself: `currentGeneration(a,
+  // 1)` hands back a v2 hook as a v1 generation, and a caller matching by hook gets
+  // whichever copy its own ordering reaches first, so a v2 coin resolves with no lens and
+  // every per-pool read it gates (reserves, the frozen fee schedule, the split) goes
+  // quiet. v2 entries lead `raw`, so first-wins keeps the entry that knows the most.
+  const seen = new Set<string>();
   for (const g of raw) {
     if (!usable(g.launchHook) || !usable(g.rallyRouter)) continue;
+    const hook = g.launchHook.toLowerCase();
+    if (seen.has(hook)) continue;
+    seen.add(hook);
     const version = g.protocolVersion ?? 1;
     out.push({
       launchHook: g.launchHook,
