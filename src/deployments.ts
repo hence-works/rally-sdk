@@ -4,6 +4,38 @@
 import type { RallyAddresses } from "./types";
 
 export const DEPLOYMENTS: Record<number, RallyAddresses> = {
+  143: {
+    chainId: 143,
+    deploymentBlock: 104443939,
+    weth: "0x3bd359C1119dA7Da1D913D1C4D2B7c461115433A",
+    usdc: "0x754704Bc059F8C67012fEd69BC8A327a5aafb603",
+    poolManager: "0x188d586ddcf52439676ca21a244753fa19f9ea8e",
+    paramRegistry: "0xE8e91C2c0A8F49Dd0Aecb0177b7184e4aBAC8B41",
+    launchLib: "0xF73f988e488453Fb304EF33b1340F55CFCbe8409",
+    launchHook: "0xb18f6636dd3a782f230c3620eBAAceE7880B68CC",
+    rallyFactory: "0xB279a18fAa3f5a547F1ECb45C460293823beE7D2",
+    rallyRouter: "0x3Ff2A4c774d06f36CF60fbB5D7631D2E49D5aF25",
+    dividendDistributor: "0x5d4BaDc362cc6AAc4ffb60a9C308e5B3bc01C81d",
+    rallyVault: "0xC731D1Da32C05e5031AAa95bDc075A2af5E66433",
+    gachaVault: undefined,
+    cappedGovernor: undefined,
+    rallyUniversalRouter: undefined,
+    ponsV2CurveResolver: undefined,
+    v2Deployments: [
+      {
+        launchHook: "0xb18f6636dd3a782f230c3620eBAAceE7880B68CC",
+        rallyFactory: "0xB279a18fAa3f5a547F1ECb45C460293823beE7D2",
+        rallyRouter: "0x3Ff2A4c774d06f36CF60fbB5D7631D2E49D5aF25",
+        paramRegistry: "0xE8e91C2c0A8F49Dd0Aecb0177b7184e4aBAC8B41",
+        launchLib: "0xF73f988e488453Fb304EF33b1340F55CFCbe8409",
+        curveShapes: "0xB7bC50cc3531C455A6f63530Eab55f87aDe7CE90",
+        lens: "0x1041B5AB2eE7691fFeB0f70eb9A877cfCAB9fdca",
+        rallyVault: "0xC731D1Da32C05e5031AAa95bDc075A2af5E66433",
+        dividendDistributor: "0x5d4BaDc362cc6AAc4ffb60a9C308e5B3bc01C81d",
+        deploymentBlock: 104443939,
+      },
+    ],
+  },
   4663: {
     chainId: 4663,
     deploymentBlock: 39900646,
