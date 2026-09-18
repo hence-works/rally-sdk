@@ -22,9 +22,9 @@ import { readContract } from "viem/actions";
 import { erc20Abi, rallyFactoryAbi, rallyFactoryU4Abi, rallyHookAbi } from "./abis";
 import { currentGeneration } from "./addresses";
 import { RallyError } from "./errors";
-import { mineSalt } from "./mine-core";
+import { mineSalt, type MineEngine } from "./mine";
 import { poolIdOf } from "./pool";
-import { packSalt, saltCreator } from "./salt";
+import { packSalt, randomNonce, saltCreator } from "./salt";
 import type {
   CurveSegment,
   FeePolicy,
@@ -148,6 +148,20 @@ export interface LaunchParams {
   /** Approve `type(uint256).max` instead of the exact amount owed. Default false. */
   approveMax?: boolean;
   mining?: {
+    /**
+     * Pin the end of the token's address: hex nibbles, with or without `0x`
+     * (`"cafe"`, `"0000"`). Omitted, the address is whatever the first salt that sorts
+     * below the quote lands on, which is the default and costs about two attempts.
+     *
+     * Every nibble multiplies the search by 16 (four nibbles is about 131k attempts,
+     * six about 33.5M), so a suffix is the one launch option that can take real time.
+     * `maxAttempts` scales with it automatically, `onProgress` reports it, and `signal`
+     * cancels it. There is deliberately no prefix option: it would constrain the same
+     * bits as the ordering rule and the two can be mutually unsatisfiable.
+     */
+    suffix?: string;
+    /** Force a grind loop. Default `"auto"`: WASM for a suffix, JS without one. */
+    engine?: MineEngine;
     onProgress?: (attempts: number) => void;
     signal?: AbortSignal;
     maxAttempts?: number;
@@ -791,9 +805,24 @@ export async function prepareLaunch(
       functionName: "predictToken",
       args: [salt, name, symbol],
     });
+    // I-7, checked here and not only inside the miner, because a host that grinds its
+    // own salt (a Worker, a pool of them, a backend) skips that loop entirely. The
+    // failure it prevents is the expensive one: ordering is not checked until `launch`,
+    // which is AFTER the metadata has been pinned at this address, and a pinned blob at
+    // a dead address is not recoverable. v1 has no ordering rule, so this is v2 only.
+    if (protocolVersion === 2 && BigInt(token) >= BigInt(quote.address)) {
+      throw new RallyError(
+        "INVALID_SALT",
+        `Salt lands the token at ${token}, which does not sort below the quote ` +
+          `${quote.address} (I-7), so \`launch\` would revert TokenMustSortBelowQuote. ` +
+          `Mine it with mineSalt({ quote }).`,
+        { details: { token, quote: quote.address } },
+      );
+    }
   } else {
     step("mining");
     const mined = await mineSalt({
+      ...params.mining,
       deployer,
       creator,
       initCodeHash,
@@ -801,7 +830,14 @@ export async function prepareLaunch(
       // predicate lives here, not on the factory, and a salt that misses it reverts
       // `TokenMustSortBelowQuote`.
       quote: quoteAddress,
-      ...params.mining,
+      // A RANDOM start, unless the caller pinned one. `mineSalt` itself defaults to 0
+      // and stays deterministic, which is what its tests and a sharded worker pool
+      // want, but a launch must not: the address is a function of (LaunchLib, salt,
+      // initCodeHash(name, symbol)), so the same creator relaunching the same name and
+      // ticker would grind the identical salt and revert `TokenAddressTaken()` in
+      // `LaunchLib.mineAndDeploy`. That revert is the expensive one, since it lands
+      // after the metadata has been pinned at that address.
+      startNonce: params.mining?.startNonce ?? randomNonce(),
     });
     salt = mined.salt;
     token = mined.address;

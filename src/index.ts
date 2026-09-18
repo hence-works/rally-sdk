@@ -88,8 +88,23 @@ export {
 } from "./clmm";
 export type { CurvePricePoint, LadderPosition, SwapResult } from "./clmm";
 
-// Salts mining
-export { computeTokenAddress, packSalt, saltCreator } from "./salt";
+// Salts and mining. `mineSalt` is exported so a host can grind off its own thread (a
+// Worker, a worker pool, a backend job) and hand the result to `launch`/`prepareLaunch`
+// as `salt`, which is the only way a slow grind stays off a UI thread: the launch
+// helpers mine inline by design.
+export { computeTokenAddress, packSalt, randomNonce, saltCreator } from "./salt";
+export { mineSalt, selectMineEngine } from "./mine";
+export type { MineEngine, MineSaltOptions } from "./mine";
+export { mineSaltJs } from "./mine-core";
+export type { MineOptions, MineResult } from "./mine-core";
+export { isWasmMinerAvailable, mineSaltWasm } from "./mine-wasm";
+export {
+  MAX_SUFFIX_NIBBLES,
+  parseSuffix,
+  suffixAttempts,
+  suffixMaxAttempts,
+} from "./suffix";
+export type { SaltSuffix } from "./suffix";
 
 // Curve math — the on-chain bonding curve, ported exactly.
 export {

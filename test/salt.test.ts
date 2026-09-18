@@ -7,7 +7,9 @@
  */
 import { describe, expect, it } from "vitest";
 import { getCreate2Address, keccak256, toHex, type Address, type Hex } from "viem";
-import { mineSalt } from "../src/mine-core";
+// The pure-JS loop specifically: the engine-agnostic entry point and the WASM loop are
+// covered in ./mine.test.ts, which also pins the two to identical answers.
+import { mineSaltJs as mineSalt } from "../src/mine-core";
 import { computeTokenAddress, packSalt, saltCreator } from "../src/salt";
 
 const CREATOR: Address = "0x1111111111111111111111111111111111111111";
@@ -43,7 +45,7 @@ describe("computeTokenAddress", () => {
   });
 });
 
-describe("mineSalt", () => {
+describe("mineSaltJs", () => {
   it("returns a creator-bound salt whose address sorts below the quote", async () => {
     const result = await mineSalt({
       deployer: DEPLOYER,

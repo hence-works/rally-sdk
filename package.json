@@ -1,6 +1,6 @@
 {
   "name": "@rally-fun/sdk",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Launch and trade Rally coins from any app \u2014 headless TypeScript SDK for Rally, the programmable market layer for humans + agents (Uniswap v4 bonding curve + graduation).",
   "license": "MIT",
   "author": "Rally",

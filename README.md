@@ -98,7 +98,8 @@ Four things worth knowing, because they constrain the order of operations:
 - **The token address is mined, not assigned.** A launch token must sort BELOW its quote
   (so it is always `currency0`), so the SDK grinds a CREATE2 salt first. That salt is *creator-bound* — its high 20 bytes must equal the sending
   account — so the address commits to its creator and can't be front-run off public
-  calldata.
+  calldata. Pass `mining: { suffix: "cafe" }` to pin how the address ends; see
+  [Salt mining](#salt-mining) for what each nibble costs.
 - **Metadata comes after the address, never before.** The URI is frozen onto the token
   at launch and can never be changed, so it has to point at something that already
   resolves for an address that doesn't exist yet. That is why mining runs first.
@@ -174,28 +175,53 @@ around:
 
 ### Salt mining
 
-Mining is pure-local — no RPC per attempt. One small JS loop: the only predicate on a
-launch address is that it sorts below the launch's quote (I-7), which about half of all
-salts satisfy, so it lands in a couple of attempts. An earlier version of this package
-mined a governed address-VANITY pattern instead and shipped an embedded WASM engine for
-it; both are gone. The pattern pinned the same high nibbles the ordering rule governs, so
-a pattern sorting above a quote made every launch on that quote impossible.
+Mining is pure-local: no RPC per attempt. The only predicate the protocol puts on a launch
+address is that it sorts below the launch's quote (I-7), which about half of all salts
+satisfy, so a plain launch lands in a couple of attempts and `launch` mines it inline
+without you noticing.
 
 ```ts
 import { mineSalt } from "@rally-fun/sdk";
 
 const { salt, address, attempts } = await mineSalt({
-  deployer: rally.addresses.launchLib,   // the CREATE2 `from` — NOT the factory
+  deployer: rally.addresses.launchLib,   // the CREATE2 `from`, NOT the factory
   creator: myAddress,
   initCodeHash,
   quote: quoteAddress,                   // REQUIRED: the address must sort below it
+  suffix: "cafe",                        // optional: pin the end of the address
   onProgress: (n) => setProgress(n),
   signal: controller.signal,
 });
 ```
 
+**`suffix` is the one vanity shape on offer**, and the ordering rule is why. A suffix pins
+the address's low nibbles, which is independent of ordering, so the two predicates compose:
+expected attempts are `2 · 16^n`. A prefix would pin the same high nibbles ordering
+governs, and the two can be mutually unsatisfiable, which is not hypothetical: an earlier
+version of this package mined a governed prefix pattern, and `0x1f60…` does not sort below
+Robinhood's wETH at `0x0Bd7…`, so no wETH-quoted coin could be launched on that chain at
+all. Hence suffix only.
+
+| suffix | expected attempts | WASM, one thread |
+| ------ | ----------------- | ---------------- |
+| none   | 2                 | instant          |
+| 4      | 131k              | under a second   |
+| 6      | 33.5M             | tens of seconds  |
+| 8      | 8.6B              | hours: don't     |
+
+Two engines grind it. `mineSalt` picks with no configuration: the pure-JS loop when no
+suffix is asked for (instantiating a module to do two hashes is not worth it), and an
+embedded WASM keccak when one is, which measures 4x to 5x the JS loop and is base64 inlined
+so it needs no bundler config and works under any CSP. Force one with
+`engine: "wasm" | "js"`, and ask which one would run with `selectMineEngine`.
+
+Both engines check ordering inside the loop, so neither can hand back a salt that reverts
+`TokenMustSortBelowQuote`. `prepareLaunch` re-checks it for a salt you mined yourself,
+because that revert lands *after* the metadata has been pinned at the address.
+
 Shard across workers by giving each a distinct `startNonce` and a `stride` equal to the
-worker count; pass a pre-mined `salt` to `prepareLaunch` to skip the grind.
+worker count; pass a pre-mined `salt` to `prepareLaunch` to skip the grind, which is how a
+UI keeps a long one off its main thread.
 s
 const launch = await rally.getLaunch(token);
 // → phase, bonded/gradThreshold, poolPriceWad, reserves, feeSplit, poolKey, pid
