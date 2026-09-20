@@ -16,7 +16,7 @@
  *      user exactly one extra signature, cached for the session.
  */
 import { createSiweMessage } from "viem/siwe";
-import type { Address } from "viem";
+import type { Address, Hex } from "viem";
 import { RallyError } from "./errors";
 import type { LaunchMetadata } from "./types";
 
@@ -47,6 +47,17 @@ export interface PinInput extends LaunchMetadata {
   chainId: number;
   /** The mined CREATE2 address — the pin path must match the address `launch` deploys. */
   tokenAddress: Address;
+  /**
+   * The salt `tokenAddress` was mined from. A pinning service cannot authorize this
+   * write against the token, which does not exist yet, but it can against the salt:
+   * `launch` requires the high 20 bytes to equal the sender, so a service that checks
+   * `saltCreator(salt)` against its authenticated wallet and `predictLaunchAddress(...)`
+   * against `tokenAddress` knows the caller is the only account that can deploy there.
+   * Not a secret: it is public in the launch calldata a moment later.
+   */
+  salt: Hex;
+  /** The account the salt is bound to, and the sender of the launch that follows. */
+  creator: Address;
 }
 
 /**
@@ -211,6 +222,10 @@ export function createRallyPinner(config: MetadataConfig): RallyPinner {
           input: {
             chainId: input.chainId,
             tokenAddress: input.tokenAddress,
+            // The creator is deliberately NOT sent. The gateway takes it from the signed
+            // session, so a caller cannot name one; the salt is what ties that session to
+            // this address.
+            salt: input.salt,
             name: input.name,
             symbol: input.symbol,
             description: input.description,

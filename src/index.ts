@@ -159,7 +159,9 @@ export type { RegistryKey } from "./params";
 
 // Launching
 export {
+  launchCreate2Inputs,
   parseLaunchReceipt,
+  predictLaunchAddress,
   prepareLaunch,
   readQuoteConfig,
   validateFeeSplit,

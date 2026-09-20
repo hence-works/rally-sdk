@@ -147,6 +147,20 @@ Rally pins at `/<chainId>/<token>.json`. Already hold a session? Pass `metadata.
 and no signature is requested. Want your own storage entirely? Pass an object
 implementing `MetadataPinner` as `metadata`.
 
+A pin happens before the launch transaction, so the token does not exist yet and there
+is no on-chain creator to authorize the write against. `PinInput` therefore carries the
+`salt` the address was mined from, alongside the `creator` it is bound to. Rally's
+pinner forwards the salt and the service checks two things against it: that
+`saltCreator(salt)` is the signed-in wallet, and that the salt predicts the address
+being claimed. Together those mean only the account that can deploy the address can pin
+at it. A key is also write-once, so a pinned address is never reassigned; if you need
+different metadata, mine a new salt.
+
+If you implement `MetadataPinner` yourself and authorize writes, do the same check:
+`predictLaunchAddress(client, factory, { salt, name, symbol })` returns the address a
+salt mines, and `saltCreator(salt)` returns the account it is bound to. Both are
+exported.
+
 If you host the JSON yourself, `metadataURI` must be `https://`, `ipfs://`, or an
 inline `data:application/json,...` document. The contract stores whatever string you
 give it, forever, so `validateMetadataURI` refuses the forms that can never resolve

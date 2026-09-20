@@ -24,7 +24,7 @@ import { currentGeneration } from "./addresses";
 import { RallyError } from "./errors";
 import { mineSalt, type MineEngine } from "./mine";
 import { poolIdOf } from "./pool";
-import { packSalt, randomNonce, saltCreator } from "./salt";
+import { computeTokenAddress, packSalt, randomNonce, saltCreator } from "./salt";
 import type {
   CurveSegment,
   FeePolicy,
@@ -598,12 +598,108 @@ function resolvePinMetadata(
 }
 
 /**
+ * The two factory views a CREATE2 prediction needs.
+ *
+ * Spelled out here rather than taken from `rallyFactoryAbi` or `rallyFactoryU4Abi`
+ * because both generations carry these two identically, and a caller checking an
+ * address against every live generation should not have to know which one it holds.
+ */
+const create2ViewsAbi = [
+  {
+    type: "function",
+    name: "tokenInitCodeHash",
+    stateMutability: "view",
+    inputs: [
+      { name: "name", type: "string" },
+      { name: "symbol", type: "string" },
+    ],
+    outputs: [{ name: "", type: "bytes32" }],
+  },
+  {
+    type: "function",
+    name: "launchLib",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "address" }],
+  },
+] as const;
+
+/**
+ * The two values a launch token's CREATE2 address is built from, read from the factory
+ * that would deploy it.
+ *
+ * `LaunchLib` runs the `new RallyToken{salt}`, so it, not the factory, is the CREATE2
+ * `from`. Mining or predicting against the factory lands a different address entirely.
+ * Both come off the chain rather than the bundled manifest, so a generation whose
+ * deployer moved cannot be predicted against a stale bundled address.
+ */
+export async function launchCreate2Inputs(
+  client: PublicClientLike,
+  factory: Address,
+  name: string,
+  symbol: string,
+): Promise<{ initCodeHash: Hex; deployer: Address }> {
+  const [initCodeHash, deployer] = await Promise.all([
+    readContract(client, {
+      address: factory,
+      abi: create2ViewsAbi,
+      functionName: "tokenInitCodeHash",
+      args: [name, symbol],
+    }),
+    readContract(client, { address: factory, abi: create2ViewsAbi, functionName: "launchLib" }),
+  ]);
+  return { initCodeHash, deployer };
+}
+
+/**
+ * The address `salt` would deploy a launch token to under `factory`, without launching.
+ * Mirrors `RallyFactory.predictToken`.
+ *
+ * This is the check a metadata pinning service needs. A pin happens before the launch
+ * transaction, so there is no on-chain creator to authorize against; but the address is
+ * a pure function of the salt, and `launch` binds a salt's high 20 bytes to the sender
+ * (`SaltNotCreatorBound`). Confirming both that `saltCreator(salt)` is the authenticated
+ * wallet and that this address is the one being claimed proves the caller is the only
+ * account that can ever deploy there, which is as much authority as exists at pin time.
+ *
+ * Computed locally from the two reads rather than by calling `predictToken`, so a caller
+ * testing one salt against several generations pays a round trip per factory instead of
+ * per candidate.
+ */
+export async function predictLaunchAddress(
+  client: PublicClientLike,
+  factory: Address,
+  params: { salt: Hex; name: string; symbol: string },
+): Promise<Address> {
+  const { initCodeHash, deployer } = await launchCreate2Inputs(
+    client,
+    factory,
+    params.name,
+    params.symbol,
+  );
+  return computeTokenAddress(deployer, params.salt, initCodeHash);
+}
+
+/**
  * Pins a launch's metadata and returns the URI to freeze onto the token. `metadata`
  * arrives fully resolved and validated, so an implementation only has to store it.
+ *
+ * `salt` and `creator` are passed so a pinning service can AUTHORIZE the write rather
+ * than merely authenticate the caller. A pin necessarily happens before the launch
+ * transaction, so the token does not exist yet and has no on-chain creator to check
+ * against; what does exist is the salt, whose high 20 bytes `launch` requires to equal
+ * `msg.sender` (`SaltNotCreatorBound`). A service that checks `saltCreator(salt)`
+ * against its authenticated wallet, and `predictLaunchAddress(...)` against
+ * `tokenAddress`, knows the caller is the only account that can deploy there.
+ *
+ * Both are derived values, not secrets: `creator` is already the sender of the launch
+ * and `salt` is public in its calldata a moment later.
  */
 export type PinLaunchMetadata = (input: {
   chainId: number;
   tokenAddress: Address;
+  salt: Hex;
+  creator: Address;
   metadata: LaunchMetadata;
 }) => Promise<string>;
 
@@ -773,18 +869,7 @@ export async function prepareLaunch(
 
   // The token's CREATE2 address depends only on (LaunchLib, salt, initCodeHash), so
   // both reads happen once and the grind is pure-local from there.
-  const [initCodeHash, deployer] = await Promise.all([
-    readContract(client, {
-      address: factory,
-      abi: factoryAbi,
-      functionName: "tokenInitCodeHash",
-      args: [name, symbol],
-    }),
-    // LaunchLib runs the `new RallyToken{salt}`, so it — not the factory — is the
-    // CREATE2 `from`. Mining against the factory lands a different address entirely and
-    // reverts. Read it rather than trusting the bundled manifest.
-    readContract(client, { address: factory, abi: factoryAbi, functionName: "launchLib" }),
-  ]);
+  const { initCodeHash, deployer } = await launchCreate2Inputs(client, factory, name, symbol);
 
   let salt: Hex;
   let token: Address;
@@ -865,6 +950,8 @@ export async function prepareLaunch(
     metadataURI = await pin({
       chainId: addresses.chainId,
       tokenAddress: token,
+      salt,
+      creator,
       metadata: pinMetadata,
     });
   }
