@@ -46,6 +46,14 @@ console.log(quote.amountOut, quote.feeBps, quote.minAmountOut);
 await rally.swap(token, { side: "buy", amountIn: parseEther("0.1"), payWithEth: true });
 ```
 
+## Partner signals
+
+Server-to-server partners can import `RallyPartnerSignal`, the wire enum constants,
+`parseRallyPartnerSignal`, `signRallyPartnerWebhook` and `verifyRallyPartnerWebhook`.
+The helpers authenticate the timestamp together with the exact raw body before parsing.
+See the [partner integration guide](https://github.com/longshot-fun/cohort-apps/blob/main/docs/PARTNER-INTEGRATION.md)
+for the shared vector, signal contract, generation-safe route and deployment addresses.
+
 ## Two ways to sign
 
 Every write has a `prepare*` form that returns an unsigned request and touches no

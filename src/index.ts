@@ -278,3 +278,4 @@ export type {
   TxRequest,
   WalletClientLike,
 } from "./types";
+export * from "./partner";
