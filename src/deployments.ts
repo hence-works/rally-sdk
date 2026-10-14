@@ -23,6 +23,18 @@ export const DEPLOYMENTS: Record<number, RallyAddresses> = {
     ponsV2CurveResolver: undefined,
     v2Deployments: [
       {
+        launchHook: "0x0897F293b435d1FbCEA464dc19C1788a261068CC",
+        rallyFactory: "0xb61C8C339a246c932CEaFB6b31f454DDC854B606",
+        rallyRouter: "0x9953aA506e0258b72d9eA22EA95af40688147a1d",
+        paramRegistry: "0x4798fa8823ccb6cb49Ad2996F381A6106c896bD8",
+        launchLib: "0x09F1120D0413377631FdEF4053ae700906C4ccD4",
+        curveShapes: "0xafA09a416B2DD1F6b8bdAA7A11e499F6b13AFdd5",
+        lens: "0x78d57099233C9ee7A049b14C59C5abb2C5c22273",
+        rallyVault: "0x6000908180132982AA17a4D7C2418a58FD0d4e0a",
+        dividendDistributor: "0x365be759C7A5a7567637626b6b4f4c9a0e648abE",
+        deploymentBlock: 113363092,
+      },
+      {
         launchHook: "0xb18f6636dd3a782f230c3620eBAAceE7880B68CC",
         rallyFactory: "0xB279a18fAa3f5a547F1ECb45C460293823beE7D2",
         rallyRouter: "0x3Ff2A4c774d06f36CF60fbB5D7631D2E49D5aF25",
@@ -69,6 +81,18 @@ export const DEPLOYMENTS: Record<number, RallyAddresses> = {
     ],
     v2Deployments: [
       {
+        launchHook: "0x173604A8292eEF32de51Dd9E30144fCE5530E8CC",
+        rallyFactory: "0x7008724e00e90790eDB3a2BbdE04f4316f407B19",
+        rallyRouter: "0x69f78d27dDBb1E2e7467603B89DD158762173C26",
+        paramRegistry: "0x5D38163Cd688228c7C3Aa5312E1b88f9422B0A04",
+        launchLib: "0x9A25E2bc04eb2a11ca96088F18E4840640817605",
+        curveShapes: "0x0B975F2Ce4225Df6b9Bc66C0a1c4d1D3BC1c4D12",
+        lens: "0x01F1870f292E898bE71317F4f2a0e3787098BcAd",
+        rallyVault: "0x96DD7213DcCE97c4F76cB1e97F35fF3926b010fA",
+        dividendDistributor: "0x06783CD71c3fd84557aaC56cae236e4Db9E074cd",
+        deploymentBlock: 88474268,
+      },
+      {
         launchHook: "0x369fc170b278A71B07c6C34249B52D6a76f9A8cc",
         rallyFactory: "0x2165066fce00BEcF1b416F61d22bFeaB313c0bE7",
         rallyRouter: "0xf93DC48bB73416bCe0230D5B696e3f785EA32771",
@@ -101,6 +125,18 @@ export const DEPLOYMENTS: Record<number, RallyAddresses> = {
     ponsV2CurveResolver: undefined,
     v2Deployments: [
       {
+        launchHook: "0xA4423E2ef91ACBE48B8213DDC47998d1897668Cc",
+        rallyFactory: "0xd1d9D03Ee16F328deE9E79722CBc8D2c5797A3B6",
+        rallyRouter: "0x78d57099233C9ee7A049b14C59C5abb2C5c22273",
+        paramRegistry: "0x09F1120D0413377631FdEF4053ae700906C4ccD4",
+        launchLib: "0xafA09a416B2DD1F6b8bdAA7A11e499F6b13AFdd5",
+        curveShapes: "0x6000908180132982AA17a4D7C2418a58FD0d4e0a",
+        lens: "0x946911555530F38c03604E73aa941498B8d511c0",
+        rallyVault: "0x23e4a64b83357B4923e85B3540947a99362bA597",
+        dividendDistributor: "0xff9BCBcE373D36CaA9c4A7a364B9360237e9930A",
+        deploymentBlock: 25943780,
+      },
+      {
         launchHook: "0xAC9b0eF27801942c63322cCf262DE2cD144B68CC",
         rallyFactory: "0xB279a18fAa3f5a547F1ECb45C460293823beE7D2",
         rallyRouter: "0x3Ff2A4c774d06f36CF60fbB5D7631D2E49D5aF25",
@@ -132,6 +168,18 @@ export const DEPLOYMENTS: Record<number, RallyAddresses> = {
     rallyUniversalRouter: undefined,
     ponsV2CurveResolver: undefined,
     v2Deployments: [
+      {
+        launchHook: "0xcec36aDe79FCFc24b64fCAb1eB2790E48f02E8CC",
+        rallyFactory: "0x9c2b14a535091d995b4E66e96F39DF4533362CE6",
+        rallyRouter: "0xA4103ce0465D6B7fE8c90995a1F652b7C262E75e",
+        paramRegistry: "0xE8ccbEb70549Cc3ef899F52f12fA56211E04fDa6",
+        launchLib: "0x9953aA506e0258b72d9eA22EA95af40688147a1d",
+        curveShapes: "0x78d57099233C9ee7A049b14C59C5abb2C5c22273",
+        lens: "0x508220caC416f703D73C5bcBd440adeC01bB2783",
+        rallyVault: "0x946911555530F38c03604E73aa941498B8d511c0",
+        dividendDistributor: "0xE363a6D0611C91E407b11BD0b51E0a7A7FCBfAe8",
+        deploymentBlock: 52601115,
+      },
       {
         launchHook: "0x62F0f235d5BaF8e249201800DB5f2258478DE8cc",
         rallyFactory: "0xB279a18fAa3f5a547F1ECb45C460293823beE7D2",
