@@ -1,7 +1,7 @@
 /**
  * ABI fragments for every call the SDK makes. Hand-authored (not the full generated
  * ABIs) so the published bundle stays small, but every signature here is copied from
- * the deployed Solidity in `packages/cohort-protocol/src`.
+ * the deployed Solidity in `packages/rally-protocol/src`.
  *
  * Creation lives on RallyFactory, per-pool state and events on RallyHook, trading on
  * RallyRouter — the three are separate contracts and the split matters: `launch` is

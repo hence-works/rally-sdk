@@ -12,7 +12,7 @@ who cannot patch it.
 
 - **No runtime imports from private workspaces.** Addresses are baked in by
   `yarn workspace @rally-fun/sdk sync:deployments`, which regenerates
-  `src/deployments.ts` from `packages/cohort-protocol/deployments/*.json`. Re-run it after **every**
+  `src/deployments.ts` from `packages/rally-protocol/deployments/*.json`. Re-run it after **every**
   redeploy and publish a new version: a stale bundled address is the one failure an
   integrator cannot debug from their side.
 - **`viem` is a peer dependency.** Never promote it to a dependency; two viem copies
@@ -85,7 +85,7 @@ yarn workspace @rally-fun/sdk sync:deployments   # re-bake addresses after a red
 
 1. `sync:deployments` if any address moved. `prepublishOnly` runs
    `check:deployments`, which fails the publish when `src/deployments.ts` has drifted
-   from `packages/cohort-protocol/deployments/*.json`, so a stale address cannot ship silently.
+   from `packages/rally-protocol/deployments/*.json`, so a stale address cannot ship silently.
 2. `test` and `typecheck` green.
 3. Bump the version (any exported-name change is breaking).
 4. `npm publish` from this directory. `prepublishOnly` re-runs the check, build and
