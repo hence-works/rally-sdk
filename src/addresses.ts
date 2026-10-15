@@ -9,7 +9,7 @@
 import { isAddress, type Address } from "viem";
 import { DEPLOYMENTS } from "./deployments";
 import { RallyError } from "./errors";
-import type { HookGeneration, RallyAddresses } from "./types";
+import type { GenerationStatus, HookGeneration, RallyAddresses } from "./types";
 
 export const ZERO_ADDRESS: Address = "0x0000000000000000000000000000000000000000";
 
@@ -116,6 +116,9 @@ export function generationsOf(addresses: RallyAddresses): HookGeneration[] {
     cappedGovernor?: Address;
     deploymentBlock?: number;
     protocolVersion?: 1 | 2;
+    status?: GenerationStatus;
+    retiredAt?: string;
+    indexed?: boolean;
   }> = [
     // PROTOCOL v2 generations lead: they are the newest, and a launch targeting v2 wants
     // the first v2 entry. They are NOT a successor to the v1 entries below — both
@@ -134,6 +137,8 @@ export function generationsOf(addresses: RallyAddresses): HookGeneration[] {
       gachaVault: addresses.gachaVault,
       cappedGovernor: addresses.cappedGovernor,
       deploymentBlock: addresses.deploymentBlock,
+      status: addresses.status,
+      retiredAt: addresses.retiredAt,
     },
     ...(addresses.legacyDeployments ?? []),
   ];
@@ -178,23 +183,33 @@ export function generationsOf(addresses: RallyAddresses): HookGeneration[] {
       gachaVault: usable(g.gachaVault) ? g.gachaVault : undefined,
       cappedGovernor: usable(g.cappedGovernor) ? g.cappedGovernor : undefined,
       deploymentBlock: g.deploymentBlock ?? 0,
+      // Absent reads as active and indexed: every generation recorded before these
+      // fields existed was both when it was written.
+      status: g.status ?? "active",
+      ...(g.retiredAt ? { retiredAt: g.retiredAt } : {}),
+      indexed: g.indexed ?? true,
     });
   }
   return out;
 }
 
 /**
- * The newest generation running `protocolVersion`, or undefined when the chain has none.
+ * The newest ACTIVE generation running `protocolVersion`, or undefined when the chain has
+ * none taking launches.
  *
  * This is what a LAUNCH resolves against, because launching is the one operation that
  * chooses a generation rather than inheriting one. Every other path resolves the
- * generation from the coin (`generationForHook`), since a coin's hook is permanent.
+ * generation from the coin (`generationForHook`), since a coin's hook is permanent and a
+ * retired generation's coins still trade. Order alone is not the answer: a retired
+ * generation's factory has every quote closed, so a launch there reverts.
  */
 export function currentGeneration(
   addresses: RallyAddresses,
   protocolVersion: 1 | 2,
 ): HookGeneration | undefined {
-  return generationsOf(addresses).find((g) => g.protocolVersion === protocolVersion);
+  return generationsOf(addresses).find(
+    (g) => g.protocolVersion === protocolVersion && g.status === "active",
+  );
 }
 
 /** The generation whose hook is `hook` (case-insensitive), or undefined if unknown. */

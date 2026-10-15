@@ -269,6 +269,9 @@ describe("generationsOf", () => {
         // GENERATION, which is a different axis from `protocolVersion` (the launch layer
         // the hook implements) and predates it.
         protocolVersion: 1,
+        // An address set with no status fields reads as active and indexed.
+        status: "active",
+        indexed: true,
       },
     ]);
     // An explicit empty list means the same thing as no list at all.

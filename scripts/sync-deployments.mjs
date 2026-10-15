@@ -58,6 +58,17 @@ const entries = files
 
 const field = (v) => (v === undefined ? "undefined" : JSON.stringify(v));
 
+// `Status` / `RetiredAt` / `Indexed`, baked only when the manifest records them. Absent
+// reads as active and indexed at runtime (`generationsOf`), which is what every entry
+// written before these keys existed was.
+const statusParts = (g) => {
+  const parts = [];
+  if (g.Status !== undefined) parts.push(`status: ${field(g.Status)}`);
+  if (g.RetiredAt) parts.push(`retiredAt: ${field(g.RetiredAt)}`);
+  if (g.Indexed !== undefined) parts.push(`indexed: ${field(g.Indexed)}`);
+  return parts;
+};
+
 // `LegacyDeployments`: every previous hook generation still live on the chain, newest
 // first. Absent or empty on a chain that has never been redeployed; both mean the same
 // thing, so the field is simply omitted then and `RallyAddresses.legacyDeployments`
@@ -92,6 +103,7 @@ const legacy = (m) => {
         parts.push(`cappedGovernor: ${field(g.CappedGovernor)}`);
       }
       parts.push(`deploymentBlock: ${g.DeploymentBlock ?? 0}`);
+      parts.push(...statusParts(g));
       return `      {\n${parts.map((p) => `        ${p},`).join("\n")}\n      },`;
     })
     .join("\n");
@@ -128,6 +140,7 @@ const v2 = (m) => {
         parts.push(`cappedGovernor: ${field(g.CappedGovernor)}`);
       }
       parts.push(`deploymentBlock: ${g.DeploymentBlock ?? 0}`);
+      parts.push(...statusParts(g));
       return `      {\n${parts.map((p) => `        ${p},`).join("\n")}\n      },`;
     })
     .join("\n");
@@ -152,7 +165,9 @@ const body = entries
     gachaVault: ${field(m.GachaVault)},
     cappedGovernor: ${field(m.CappedGovernor)},
     rallyUniversalRouter: ${field(m.RallyUniversalRouter)},
-    ponsV2CurveResolver: ${field(m.PonsV2CurveResolver)},${legacy(m)}${v2(m)}
+    ponsV2CurveResolver: ${field(m.PonsV2CurveResolver)},${statusParts(m)
+      .map((p) => `\n    ${p},`)
+      .join("")}${legacy(m)}${v2(m)}
   },`,
   )
   .join("\n");

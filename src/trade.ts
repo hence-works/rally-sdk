@@ -240,6 +240,11 @@ function generationsToProbe(
       paramRegistry: pinned.paramRegistry ?? known?.paramRegistry ?? addresses.paramRegistry,
       launchLib: known?.launchLib ?? addresses.launchLib,
       deploymentBlock: known?.deploymentBlock ?? 0,
+      // A hook this SDK does not know has no recorded status. Resolving a coin never
+      // depends on it (only a launch does), so the neutral defaults are safe here.
+      status: known?.status ?? "active",
+      ...(known?.retiredAt ? { retiredAt: known.retiredAt } : {}),
+      indexed: known?.indexed ?? true,
     },
   ];
 }

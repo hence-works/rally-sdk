@@ -259,6 +259,8 @@ export type {
   CurveShapes,
   FeePolicy,
   FeeSplit,
+  GenerationRecord,
+  GenerationStatus,
   HookGeneration,
   LaunchGeneration,
   LaunchMetadata,

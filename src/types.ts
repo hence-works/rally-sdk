@@ -94,6 +94,32 @@ export interface RallyAddresses {
    * Absent means the chain has no v2 deployment, which is not an error.
    */
   v2Deployments?: V2Deployment[];
+  /** Status of the generation the top-level keys describe. See {@link GenerationRecord}. */
+  status?: GenerationStatus;
+  /** ISO date the top-level generation was retired, "" while active. */
+  retiredAt?: string;
+}
+
+/**
+ * Whether a generation's factory still takes launches. "retired" means governance closed
+ * every quote on it: its coins keep trading on their hook forever, but nothing new
+ * launches there, so a launch must never target it.
+ */
+export type GenerationStatus = "active" | "retired";
+
+/**
+ * Status fields every recorded generation carries. Optional so an address set written
+ * before they existed stays valid; absent reads as active and indexed.
+ */
+export interface GenerationRecord {
+  status?: GenerationStatus;
+  /** ISO date its factory was closed, "" or absent while active. */
+  retiredAt?: string;
+  /**
+   * False for a generation Rally's own indexer does not follow (one recorded after the
+   * fact). The SDK still resolves and trades its coins.
+   */
+  indexed?: boolean;
 }
 
 /**
@@ -138,7 +164,7 @@ export interface CurveShapes {
  * needs an address can treat the two uniformly: `launchHook` is `RallyHookU4`,
  * `rallyFactory` is `RallyFactoryU4`.
  */
-export interface V2Deployment {
+export interface V2Deployment extends GenerationRecord {
   launchHook: Address;
   rallyFactory: Address;
   /** Pinned to one hook, so a v2 generation ships its own instance. */
@@ -169,7 +195,7 @@ export interface V2Deployment {
 }
 
 /** One retired hook generation that still serves the coins launched under it. */
-export interface LegacyDeployment {
+export interface LegacyDeployment extends GenerationRecord {
   launchHook: Address;
   rallyFactory: Address;
   rallyRouter: Address;
@@ -254,6 +280,11 @@ export interface HookGeneration {
   /** That generation's capped governor. See the chain-level field of the same name. */
   cappedGovernor?: Address;
   deploymentBlock: number;
+  /** "active" while its factory takes launches. Filled, never absent. */
+  status: GenerationStatus;
+  retiredAt?: string;
+  /** Whether Rally's own indexer follows it. Filled, never absent. */
+  indexed: boolean;
 }
 
 /**
