@@ -28,6 +28,15 @@ export type RallyErrorCode =
   // fact about one venue on one chain rather than about the SDK, and it can change
   // without a release.
   | "VENUE_NOT_ROUTABLE"
+  // A string that is not a valid address for its VM (Solana: base58 decoding to 32 bytes).
+  | "INVALID_ADDRESS"
+  // On-chain account bytes that do not decode as the expected type (wrong account, or a
+  // layout the bundled IDL predates).
+  | "INVALID_ACCOUNT_DATA"
+  // Solana: the mint key does not sort below its quote (I-7), so its Raydium pool could never open.
+  | "MINT_MUST_SORT_BELOW_QUOTE"
+  // Solana: the launch exists but `open_pool` has not landed, so there is no pool to trade or price.
+  | "POOL_NOT_OPEN"
   | "UNSUPPORTED";
 
 export class RallyError extends Error {
