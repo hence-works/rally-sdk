@@ -37,6 +37,11 @@ export type RallyErrorCode =
   | "MINT_MUST_SORT_BELOW_QUOTE"
   // Solana: the launch exists but `open_pool` has not landed, so there is no pool to trade or price.
   | "POOL_NOT_OPEN"
+  // Solana: the pool has no liquidity left in the swap's direction, so the program would revert it.
+  | "INSUFFICIENT_LIQUIDITY"
+  // Solana: an exact quote cannot be produced (an account the swap crosses cannot be read, or the pool
+  // uses a feature the quote math does not model). Never approximated: the caller gets this instead.
+  | "QUOTE_UNAVAILABLE"
   | "UNSUPPORTED";
 
 export class RallyError extends Error {

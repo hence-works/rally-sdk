@@ -15,6 +15,7 @@ import {
 import { SOLANA_DEPLOYMENTS } from "./deployments.generated";
 import { RALLY_SOLANA_PROTOCOL_IDL } from "./idl.generated";
 import { findAssociatedTokenAddress, rallyPdas, raydiumPdas, tickArrayStart } from "./pda";
+import { applySlippage, type SolanaSwapQuote } from "./quote";
 import type { AddressOrSigner, CurveSegment, FeeConfig, LaunchAccount } from "./types";
 
 // ── Shared shapes ────────────────────────────────────────────────────────────
@@ -469,14 +470,30 @@ export async function prepareOpenPool(p: PrepareOpenPoolParams): Promise<Prepare
 export interface PrepareSwapParams extends SolanaTarget, Reads {
   trader: AddressOrSigner;
   mint: Address;
-  /** Exact input in base units: quote for a buy, launch tokens (6dp) for a sell. */
-  amountIn: bigint;
   /**
-   * REQUIRED minimum output in base units (tokens on a buy, quote on a sell). There is no
-   * default: a swap with no bound is a market order for whoever sandwiches it. Must be >= 1;
-   * derive it from a quote and your own slippage tolerance.
+   * Exact input in base units: quote for a buy, launch tokens (6dp) for a sell. Required unless
+   * `quote` is passed, in which case it defaults to the quote's own `amountIn` (and must equal it
+   * when both are given).
    */
-  minOut: bigint;
+  amountIn?: bigint;
+  /**
+   * The minimum output in base units (tokens on a buy, quote on a sell). There is no default:
+   * a swap with no bound is a market order for whoever sandwiches it. Must be >= 1. Pass it
+   * directly, or pass `quote` + `slippageBps` and it is computed for you.
+   */
+  minOut?: bigint;
+  /**
+   * An exact quote from `quoteBuySolana` / `quoteSellSolana`. With it the swap needs no
+   * simulation: its tick arrays become the swap's remaining accounts (the arrays the swap really
+   * crosses, including liquidity other LPs added), and `minOut` can be derived from it.
+   */
+  quote?: SolanaSwapQuote;
+  /**
+   * Slippage tolerance in bps applied to `quote.amountOut` to derive `minOut`. Explicit by
+   * design: it is only used when you pass it AND a `quote`, and never defaults. Mutually
+   * exclusive with `minOut`.
+   */
+  slippageBps?: number;
   /**
    * Absolute deadline, unix seconds ON THE CLUSTER'S CLOCK. Pass this OR `deadlineSeconds`.
    * The program rejects the swap once its clock passes it.
@@ -491,7 +508,7 @@ export interface PrepareSwapParams extends SolanaTarget, Reads {
   referrer?: Address;
   /** The decoded Launch, to skip the read. */
   launch?: LaunchAccount;
-  /** The pool's current tick, to skip the read (it selects which tick arrays the swap crosses). */
+  /** The pool's current tick, to skip the read (it selects which tick arrays the swap crosses). Ignored with `quote`. */
   currentTick?: number;
   traderTokenAccount?: Address;
   traderQuoteAccount?: Address;
@@ -500,10 +517,34 @@ export interface PrepareSwapParams extends SolanaTarget, Reads {
 
 async function prepareSwap(side: "buy" | "sell", p: PrepareSwapParams): Promise<PreparedSolanaTransaction> {
   const ctx = resolveTarget(p);
-  const amountIn = u64(p.amountIn, "amountIn");
-  const minOut = u64(p.minOut, "minOut");
+  if (p.quote) {
+    if (p.quote.side !== side || p.quote.mint !== p.mint) {
+      throw new RallyError(
+        "INVALID_AMOUNT",
+        `The supplied quote is a ${p.quote.side} for ${p.quote.mint}, not a ${side} for ${p.mint}`,
+      );
+    }
+    if (p.amountIn !== undefined && p.amountIn !== p.quote.amountIn) {
+      throw new RallyError("INVALID_AMOUNT", "amountIn does not match the quote's amountIn: re-quote for the amount you are sending");
+    }
+  }
+  const amountIn = u64(p.amountIn ?? p.quote?.amountIn ?? (undefined as unknown as bigint), "amountIn");
+  let minOutRaw = p.minOut;
+  if (p.slippageBps !== undefined) {
+    if (p.minOut !== undefined) {
+      throw new RallyError("INVALID_AMOUNT", "Pass minOut OR slippageBps, not both");
+    }
+    if (!p.quote) {
+      throw new RallyError("INVALID_AMOUNT", "slippageBps derives minOut from a quote: pass `quote` too, or pass minOut");
+    }
+    minOutRaw = applySlippage(p.quote.amountOut, p.slippageBps);
+  }
+  const minOut = u64(minOutRaw as bigint, "minOut");
   const launch = await launchFor(p.mint, p.launch, p.rpc, ctx);
   requirePoolOpen(launch);
+  if (p.quote && p.quote.pool !== launch.pool) {
+    throw new RallyError("INVALID_AMOUNT", "The supplied quote is for a different pool than this launch's");
+  }
   const quoteMint = launch.quoteMint;
   const qp = await quoteProgramFor(quoteMint, p.quoteTokenProgram, p.rpc, ctx);
 
@@ -516,9 +557,6 @@ async function prepareSwap(side: "buy" | "sell", p: PrepareSwapParams): Promise<
     throw new RallyError("INVALID_AMOUNT", "deadline must be a positive unix-seconds bigint");
   }
 
-  const tick =
-    p.currentTick ?? (await fetchPoolSlot0(need(p.rpc, "`currentTick`"), launch.pool, ctx.clmm)).tick;
-
   const trader = addrOf(p.trader);
   const pdas = rallyPdas(ctx.programId);
   const ray = raydiumPdas(ctx.clmm);
@@ -528,19 +566,27 @@ async function prepareSwap(side: "buy" | "sell", p: PrepareSwapParams): Promise<
   const traderQuote = p.traderQuoteAccount ?? (await findAssociatedTokenAddress(trader, quoteMint, qp));
 
   // The initialized tick arrays the swap crosses, nearest first, behind the bitmap extension.
-  // Derived from the launch's own positions, as in the reference client: liquidity another
-  // party adds to the same pool in an array this list lacks is not accounted for.
-  const owned = launch.positions.slice(0, launch.numPositions).map((x) => ({ lo: x.tickLower, hi: x.tickUpper }));
-  if (launch.support.nftMint !== UNSET_POOL) owned.push({ lo: launch.support.tickLower, hi: launch.support.tickUpper });
-  const starts = new Set<number>();
-  for (const o of owned) {
-    starts.add(tickArrayStart(o.lo));
-    starts.add(tickArrayStart(o.hi));
-  }
-  const cur = tickArrayStart(tick);
+  // With a quote these are the arrays its replay actually crossed, read off the pool's own
+  // bitmap, so liquidity another LP added is accounted for. Without one they are derived from
+  // the launch's own positions, as in the reference client: a position another party opened in
+  // an array this list lacks is not accounted for, which is the reason to pass a quote.
   const buy = side === "buy";
-  const crossed = [...starts].filter((s) => (buy ? s >= cur : s <= cur)).sort((a, b) => (buy ? a - b : b - a));
-  const remaining = [await ray.bitmap(launch.pool), ...(await Promise.all(crossed.map((s) => ray.tickArray(launch.pool, s))))];
+  let remaining: Address[];
+  if (p.quote) {
+    remaining = [await ray.bitmap(launch.pool), ...p.quote.tickArrays];
+  } else {
+    const owned = launch.positions.slice(0, launch.numPositions).map((x) => ({ lo: x.tickLower, hi: x.tickUpper }));
+    if (launch.support.nftMint !== UNSET_POOL) owned.push({ lo: launch.support.tickLower, hi: launch.support.tickUpper });
+    const starts = new Set<number>();
+    for (const o of owned) {
+      starts.add(tickArrayStart(o.lo));
+      starts.add(tickArrayStart(o.hi));
+    }
+    const tick = p.currentTick ?? (await fetchPoolSlot0(need(p.rpc, "`currentTick`"), launch.pool, ctx.clmm)).tick;
+    const cur = tickArrayStart(tick);
+    const crossed = [...starts].filter((s) => (buy ? s >= cur : s <= cur)).sort((a, b) => (buy ? a - b : b - a));
+    remaining = [await ray.bitmap(launch.pool), ...(await Promise.all(crossed.map((s) => ray.tickArray(launch.pool, s))))];
+  }
 
   const ix = buildRallyInstruction(
     ctx.programId,

@@ -557,29 +557,41 @@ npm i @rally-fun/sdk @solana/kit   # @solana/kit is an OPTIONAL peer, needed for
 ```ts
 import {
   SOLANA_DEVNET_CHAIN_ID, WSOL_MINT, grindMint, fetchLaunch, fetchQuoteConfig,
-  prepareCreateLaunch, prepareOpenPool, prepareBuy,
+  prepareCreateLaunch, prepareOpenPool, prepareBuy, prepareSell,
+  quoteBuySolana, quoteSellSolana, quoteFirstBuy,
 } from "@rally-fun/sdk/solana";
 import { createSolanaRpc } from "@solana/kit";
 
 const rpc = createSolanaRpc("https://api.devnet.solana.com");
 
 // 1. Grind a mint that sorts below the quote (I-7), THEN pin metadata at /7565165/<mint>.json.
-const mint = await grindMint(WSOL_MINT);
+//    Optionally pin the address's last characters too (case-sensitive base58, at most 3).
+const mint = await grindMint(WSOL_MINT /*, { suffix: "fun" } */);
 
 // 2. Two transactions: they do not fit in one (1,644 bytes vs the 1,232 limit, even with the
 //    lookup table). Send them back to back, ideally as a Jito bundle. A launch is
 //    tradeable only after the second lands.
+//    The creator's first buy is priced BEFORE either exists, exactly:
+const firstBuy = await quoteFirstBuy({ rpc, quoteMint: WSOL_MINT, firstBuyTokens });
 const create = await prepareCreateLaunch({ chainId: SOLANA_DEVNET_CHAIN_ID, rpc, creator, mint: mint.signer,
   quoteMint: WSOL_MINT, name, symbol, metadataUri, firstBuyTokens });
 const open = await prepareOpenPool({ chainId: SOLANA_DEVNET_CHAIN_ID, rpc, creator, mint: mint.address,
-  maxFirstBuyQuote }); // opening costs the creator ~0.29 SOL of Raydium rent
+  maxFirstBuyQuote: firstBuy.maxFirstBuyQuote }); // opening costs the creator ~0.29 SOL of Raydium rent
 // create.instructions / open.instructions are unsigned kit instructions; compile them with
 // open.lookupTable, sign with `create.signers`, and send.
 
-// 3. Trade. Exact input only. `minOut` is REQUIRED (never defaulted) and the deadline is
-//    measured from the cluster's clock, not yours.
+// 3. Trade. Exact input only. Quote first (it replays the pool exactly, no simulation), then
+//    build the swap from the quote. `minOut` is REQUIRED and never defaulted: pass it, or pass
+//    your own `slippageBps` next to the quote. The deadline is measured from the cluster's
+//    clock, not yours.
+const quote = await quoteBuySolana({ rpc, mint: mint.address, amountIn: 100_000_000n });
+quote.amountOut;          // launch tokens you get
+quote.fees;               // { routerFeeBps, routerFee, poolFee, poolFeeRate, total }, in quote units
+quote.priceImpactBps;     // fill price vs spot, fees excluded
 const buy = await prepareBuy({ chainId: SOLANA_DEVNET_CHAIN_ID, rpc, trader, mint: mint.address,
-  amountIn: 100_000_000n, minOut });
+  quote, slippageBps: 100 });          // or: amountIn: 100_000_000n, minOut: 12_345n
+const sell = await prepareSell({ chainId: SOLANA_DEVNET_CHAIN_ID, rpc, trader, mint: mint.address,
+  quote: await quoteSellSolana({ rpc, mint: mint.address, amountIn: 5_000_000n }), slippageBps: 100 });
 ```
 
 Every write is a `prepare*` returning `{ instructions, signers, lookupTable? }`: nothing signs
@@ -588,8 +600,61 @@ quote's decimals from `fetchQuoteConfig`). A buy with a wSOL quote spends wrappe
 wrap into `traderQuoteAccount` first; the SDK does not. `priceWadFromSqrtPriceX64(sqrt,
 quoteDecimals)` turns a Raydium pool's price into a WAD. Solana chain ids are Envio's
 (`7565164` mainnet, `7565165` devnet); `normalizeAddress("svm", key)` validates a key
-without touching its case. Quote math over CLMM liquidity is not in the SDK yet: derive
-`minOut` from Raydium's own quote or a simulation.
+without touching its case.
+
+### Quotes
+
+`quoteBuySolana` / `quoteSellSolana` replay Raydium's CLMM swap in integer math, rounding exactly
+as the pool does, over the pool's **real** tick arrays (read in one batched call, more on demand),
+so liquidity other LPs added to the pool is priced in. They apply the pool fee (charged in the
+quote on both sides, `collect_fee_on = Token1Only`) and the router's anti-snipe fee at the
+cluster's clock (zero after breakout). The result carries `amountOut`, `fees`, `priceImpactBps`,
+`startSqrtPriceX64` / `endSqrtPriceX64`, `startTick` / `endTick`, and the `tickArrays` the swap
+crosses, which `prepareBuy` / `prepareSell` send as the swap's remaining accounts when you pass the
+quote. `slippageBps` is yours to choose; with it the quote also returns `minOut`
+(`applySlippage` does the same sum), without it there is none.
+
+- It reads state at one moment. The price can move before your transaction lands: `minOut` is the
+  protection, not the quote. The router fee only decays, so landing later never worsens a quote.
+- It **refuses instead of approximating** (`QUOTE_UNAVAILABLE`): a tick array it needs cannot be
+  read, the pool charges a dynamic fee, a swap would reach a tick holding limit orders, or the swap
+  would cross more than `maxTickArrays` (default 12). `INSUFFICIENT_LIQUIDITY` means the program
+  itself would revert the swap. Amounts that round to nothing throw `INVALID_AMOUNT`, as the pool
+  would.
+- `quoteFirstBuy({ rpc, quoteMint, firstBuyTokens })` prices the creator's fee-exempt first buy
+  from the governed curve parameters and the quote's `B`, before `create_launch` exists. Its
+  `maxFirstBuyQuote` is exactly what `open_pool` charges: that value is accepted, one unit less
+  reverts. `quoteSwapFromState` is the pure core, for callers that already hold the accounts.
+
+**Exact-output trades are not possible.** The program's router is exact-input only (its swap
+instruction takes `amount_in` and `min_out`), so there is no "buy exactly N tokens" quote or
+`prepare*`: convert a target to an input amount yourself and re-quote. Exact-output needs a program
+upgrade.
+
+`grindMint(quote, { suffix })` pins the last 1 to 3 base58 characters (case-sensitive) of the mint
+address while keeping it below the quote (I-7). Each character costs about 58x, on top of the
+ordering rule (about 43x against wSOL): at roughly a thousand keypairs a second, one character takes
+seconds, two take minutes and three take hours. Run it in a Worker; `signal` and `onProgress` are
+there for that.
+
+## Creator-fee NFT (protocol v2)
+
+Each v2 hook has a `RallyFeeBeneficiary`, an ERC-721 (token id = pool id) holding title to a coin's
+creator fees. `claimCreatorFees` pays the holder, or the original creator while the launch is
+unregistered; v1 coins always pay the original creator.
+
+```ts
+import { getFeeBeneficiary, prepareRegisterFeeBeneficiary, prepareTransferFeeRight } from "@rally-fun/sdk";
+
+await getFeeBeneficiary(publicClient, { chainId, hook, pid }); // { supported, registered, holder } or { supported: false }
+prepareRegisterFeeBeneficiary({ chainId, hook, pid });          // permissionless; mints to the recorded creator
+prepareTransferFeeRight({ chainId, hook, pid, from, to });      // safeTransferFrom
+```
+
+`to` may be a contract (a splitter, a Safe) if it implements `onERC721Received`; for one that does not,
+pass `safe: false` for a plain `transferFrom` (it skips the receiver check, so a contract that cannot
+move the NFT would strand it). One-call forms: `registerFeeBeneficiary` / `transferFeeRight`
+(`NO_WALLET` without a wallet client).
 
 ## Chains & addresses
 
