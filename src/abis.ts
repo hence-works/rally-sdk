@@ -470,3 +470,33 @@ export const rallyUniversalRouterAbi = parseAbi([
   // depend on which asset each trader happened to arrive in.
   "event RallyRouteFilled(address indexed trader, address indexed token, address indexed assetIn, address assetOut, address hopVenue, uint256 amountIn, uint256 amountOut, uint256 routeFee)",
 ]);
+
+/**
+ * RallyFeeBeneficiary — the ERC-721 ("Rally Creator Fees", `RALLY-FEES`) holding title to a
+ * launch's creator-fee stream. Token id = the pool id as a uint256. `register` is permissionless
+ * and mints to the creator the hook recorded; until then `beneficiaryOf` answers the zero address
+ * and the hook pays the original creator. Plain ERC-721 otherwise (Solady).
+ *
+ * Deliberately has no `backend()`: the retired 4663 build exposes `hook()` instead, and the SDK
+ * never needs either.
+ */
+export const rallyFeeBeneficiaryAbi = parseAbi([
+  "function register(bytes32 pid) returns (uint256 tokenId)",
+  "function beneficiaryOf(bytes32 pid) view returns (address)",
+  "function isRegistered(bytes32 pid) view returns (bool)",
+  "function ownerOf(uint256 id) view returns (address)",
+  "function balanceOf(address owner) view returns (uint256)",
+  "function name() view returns (string)",
+  "function symbol() view returns (string)",
+  "function getApproved(uint256 id) view returns (address)",
+  "function isApprovedForAll(address owner, address operator) view returns (bool)",
+  "function approve(address spender, uint256 id)",
+  "function setApprovalForAll(address operator, bool approved)",
+  "function transferFrom(address from, address to, uint256 id)",
+  "function safeTransferFrom(address from, address to, uint256 id)",
+  "function safeTransferFrom(address from, address to, uint256 id, bytes data)",
+  "event BeneficiaryRegistered(bytes32 indexed pid, address indexed creator)",
+  "event Transfer(address indexed from, address indexed to, uint256 indexed id)",
+  "error UnknownPool()",
+  "error AlreadyRegistered()",
+]);
