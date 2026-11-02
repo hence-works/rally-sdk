@@ -545,6 +545,52 @@ that aggregated trading is off there rather than an error; the helpers throw
 
 ---
 
+## Solana
+
+Rally also runs on Solana (the Rally Solana protocol, an Anchor program over Raydium CLMM). It lives
+behind a subpath so EVM-only integrators install nothing new:
+
+```sh
+npm i @rally-fun/sdk @solana/kit   # @solana/kit is an OPTIONAL peer, needed for /solana only
+```
+
+```ts
+import {
+  SOLANA_DEVNET_CHAIN_ID, WSOL_MINT, grindMint, fetchLaunch, fetchQuoteConfig,
+  prepareCreateLaunch, prepareOpenPool, prepareBuy,
+} from "@rally-fun/sdk/solana";
+import { createSolanaRpc } from "@solana/kit";
+
+const rpc = createSolanaRpc("https://api.devnet.solana.com");
+
+// 1. Grind a mint that sorts below the quote (I-7), THEN pin metadata at /7565165/<mint>.json.
+const mint = await grindMint(WSOL_MINT);
+
+// 2. Two transactions: they do not fit in one (1,644 bytes vs the 1,232 limit, even with the
+//    lookup table). Send them back to back, ideally as a Jito bundle. A launch is
+//    tradeable only after the second lands.
+const create = await prepareCreateLaunch({ chainId: SOLANA_DEVNET_CHAIN_ID, rpc, creator, mint: mint.signer,
+  quoteMint: WSOL_MINT, name, symbol, metadataUri, firstBuyTokens });
+const open = await prepareOpenPool({ chainId: SOLANA_DEVNET_CHAIN_ID, rpc, creator, mint: mint.address,
+  maxFirstBuyQuote }); // opening costs the creator ~0.29 SOL of Raydium rent
+// create.instructions / open.instructions are unsigned kit instructions; compile them with
+// open.lookupTable, sign with `create.signers`, and send.
+
+// 3. Trade. Exact input only. `minOut` is REQUIRED (never defaulted) and the deadline is
+//    measured from the cluster's clock, not yours.
+const buy = await prepareBuy({ chainId: SOLANA_DEVNET_CHAIN_ID, rpc, trader, mint: mint.address,
+  amountIn: 100_000_000n, minOut });
+```
+
+Every write is a `prepare*` returning `{ instructions, signers, lookupTable? }`: nothing signs
+or sends. Amounts are `bigint` base units (launch tokens are **6dp** on Solana; read the
+quote's decimals from `fetchQuoteConfig`). A buy with a wSOL quote spends wrapped SOL, so
+wrap into `traderQuoteAccount` first; the SDK does not. `priceWadFromSqrtPriceX64(sqrt,
+quoteDecimals)` turns a Raydium pool's price into a WAD. Solana chain ids are Envio's
+(`7565164` mainnet, `7565165` devnet); `normalizeAddress("svm", key)` validates a key
+without touching its case. Quote math over CLMM liquidity is not in the SDK yet: derive
+`minOut` from Raydium's own quote or a simulation.
+
 ## Chains & addresses
 
 Addresses ship with the package, per chain, generated from the monorepo's deployment

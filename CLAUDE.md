@@ -72,6 +72,24 @@ who cannot patch it.
 - Keep `README.md` accurate: it is the docs an integrator reads before installing.
 - No em dashes in code comments, README or commit messages.
 
+## Solana entry point (`@rally-fun/sdk/solana`)
+
+`src/solana/` is a second entry (`tsup` builds `dist/solana.*`), for the Rally Solana protocol
+(the `rally_solana_protocol` program). Rules specific to it:
+
+- **`@solana/kit` is an OPTIONAL peer for this subpath only**; nothing under `src/solana`
+  may import `viem`, and nothing outside it may import `@solana/kit` at runtime.
+- **`idl.generated.ts` and `deployments.generated.ts` are generated** by
+  `yarn workspace @rally-fun/sdk sync:solana` from `packages/rally-solana/idl` and
+  `.../deployments/<chainId>.json`; `check:deployments` runs it with `--check`. The
+  instruction and account codec (`codec.ts`) is driven by the trimmed IDL, so a program
+  layout change is a regen, not a hand edit. No Anchor or web3.js 1.x at runtime.
+- Addresses are case-sensitive base58: use `normalizeAddress("svm", ...)`, never `toLowerCase()`.
+- `minOut` is required and rejected below 1; the swap deadline comes from the cluster's
+  Clock sysvar, never `Date.now()`. Do not add defaults for either.
+- The mint must sort below the quote (I-7); `prepareCreateLaunch` re-checks it.
+- Publishing this surface exposes the program id and IDL; the owner decides when.
+
 ## Commands
 
 ```sh

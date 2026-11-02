@@ -21,7 +21,24 @@
         "default": "./dist/index.cjs"
       }
     },
+    "./solana": {
+      "import": {
+        "types": "./dist/solana.d.ts",
+        "default": "./dist/solana.js"
+      },
+      "require": {
+        "types": "./dist/solana.d.cts",
+        "default": "./dist/solana.cjs"
+      }
+    },
     "./package.json": "./package.json"
+  },
+  "typesVersions": {
+    "*": {
+      "solana": [
+        "./dist/solana.d.ts"
+      ]
+    }
   },
   "files": [
     "dist",
@@ -38,7 +55,9 @@
     "bonding-curve",
     "evm",
     "viem",
-    "defi"
+    "defi",
+    "solana",
+    "raydium"
   ],
   "repository": {
     "type": "git",
@@ -58,12 +77,21 @@
     "typecheck": "tsc --noEmit",
     "sync:deployments": "node scripts/sync-deployments.mjs",
     "prepublishOnly": "yarn check:deployments && yarn build && yarn test",
-    "check:deployments": "node scripts/sync-deployments.mjs --check"
+    "sync:solana": "node scripts/sync-solana.mjs",
+    "check:deployments": "node scripts/sync-deployments.mjs --check && node scripts/sync-solana.mjs --check"
   },
   "peerDependencies": {
+    "@solana/kit": "^8.0.0",
     "viem": "^2.21.0"
   },
+  "peerDependenciesMeta": {
+    "@solana/kit": {
+      "optional": true
+    }
+  },
   "devDependencies": {
+    "@solana/kit": "^8.6.0",
+    "@types/node": "^20.16.0",
     "tsup": "^8.5.0",
     "typescript": "^5.7.2",
     "viem": "^2.21.0",
