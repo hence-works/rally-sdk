@@ -1,7 +1,7 @@
 import { getBase64Encoder, type Address, type GetAccountInfoApi, type Rpc } from "@solana/kit";
 import { RallyError } from "../errors";
 import { decodeAccount } from "./codec";
-import { CLOCK_SYSVAR_ADDRESS, RALLY_LAUNCH_PROGRAM_ID, RAYDIUM_CLMM_DEVNET } from "./constants";
+import { CLOCK_SYSVAR_ADDRESS, RALLY_SOLANA_PROTOCOL_PROGRAM_ID, RAYDIUM_CLMM_DEVNET } from "./constants";
 import { rallyPdas } from "./pda";
 import { priceWadFromSqrtPriceX64 } from "./price";
 import type {
@@ -46,7 +46,7 @@ export interface ReadOptions {
 
 /** Fetch a launch by its MINT. Throws `LAUNCH_NOT_FOUND` when no such launch exists. */
 export async function fetchLaunch(rpc: SolanaRpc, mint: Address, opts: ReadOptions = {}): Promise<LaunchAccount> {
-  const programId = opts.programId ?? RALLY_LAUNCH_PROGRAM_ID;
+  const programId = opts.programId ?? RALLY_SOLANA_PROTOCOL_PROGRAM_ID;
   const at = await rallyPdas(programId).launch(mint);
   const acc = await getAccount(rpc, at);
   if (!acc) throw new RallyError("LAUNCH_NOT_FOUND", `No launch for mint ${mint}`, { details: { mint } });
@@ -60,7 +60,7 @@ export async function fetchQuoteConfig(
   quoteMint: Address,
   opts: ReadOptions = {},
 ): Promise<QuoteConfigAccount> {
-  const programId = opts.programId ?? RALLY_LAUNCH_PROGRAM_ID;
+  const programId = opts.programId ?? RALLY_SOLANA_PROTOCOL_PROGRAM_ID;
   const at = await rallyPdas(programId).quoteConfig(quoteMint);
   const acc = await getAccount(rpc, at);
   if (!acc) {
@@ -71,7 +71,7 @@ export async function fetchQuoteConfig(
 }
 
 export async function fetchConfig(rpc: SolanaRpc, opts: ReadOptions = {}): Promise<ConfigAccount> {
-  const programId = opts.programId ?? RALLY_LAUNCH_PROGRAM_ID;
+  const programId = opts.programId ?? RALLY_SOLANA_PROTOCOL_PROGRAM_ID;
   const at = await rallyPdas(programId).config();
   const acc = await getAccount(rpc, at);
   if (!acc) throw new RallyError("MISSING_ADDRESS", "The Config account does not exist (program not initialized)");
@@ -86,7 +86,7 @@ export async function fetchReferral(
   referrer: Address,
   opts: ReadOptions = {},
 ): Promise<ReferralAccountData | null> {
-  const programId = opts.programId ?? RALLY_LAUNCH_PROGRAM_ID;
+  const programId = opts.programId ?? RALLY_SOLANA_PROTOCOL_PROGRAM_ID;
   const at = await rallyPdas(programId).referral(quoteMint, referrer);
   const acc = await getAccount(rpc, at);
   if (!acc) return null;

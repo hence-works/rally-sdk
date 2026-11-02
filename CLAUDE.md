@@ -74,8 +74,8 @@ who cannot patch it.
 
 ## Solana entry point (`@rally-fun/sdk/solana`)
 
-`src/solana/` is a second entry (`tsup` builds `dist/solana.*`), for the `rally_launch`
-program. Rules specific to it:
+`src/solana/` is a second entry (`tsup` builds `dist/solana.*`), for the Rally Solana protocol
+(the `rally_solana_protocol` program). Rules specific to it:
 
 - **`@solana/kit` is an OPTIONAL peer for this subpath only**; nothing under `src/solana`
   may import `viem`, and nothing outside it may import `@solana/kit` at runtime.

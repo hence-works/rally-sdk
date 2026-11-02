@@ -1,7 +1,7 @@
 import { getAddressEncoder, getProgramDerivedAddress, type Address } from "@solana/kit";
 import {
   ASSOCIATED_TOKEN_PROGRAM_ADDRESS,
-  RALLY_LAUNCH_PROGRAM_ID,
+  RALLY_SOLANA_PROTOCOL_PROGRAM_ID,
   RAYDIUM_CLMM_DEVNET,
   TICK_ARRAY_SIZE,
   TICK_SPACING,
@@ -38,8 +38,8 @@ async function derive(programAddress: Address, seeds: Uint8Array[]): Promise<Add
   return a;
 }
 
-/** PDAs of the rally_launch program (default: the shipped program id). */
-export function rallyPdas(programId: Address = RALLY_LAUNCH_PROGRAM_ID) {
+/** PDAs of the Rally Solana protocol program (default: the shipped program id). */
+export function rallyPdas(programId: Address = RALLY_SOLANA_PROTOCOL_PROGRAM_ID) {
   const p = (...seeds: Uint8Array[]) => derive(programId, seeds);
   return {
     config: () => p(te.encode("config")),

@@ -1,6 +1,6 @@
 import { getAddressDecoder, getAddressEncoder, type Address } from "@solana/kit";
 import { RallyError } from "../errors";
-import { RALLY_LAUNCH_IDL } from "./idl.generated";
+import { RALLY_SOLANA_PROTOCOL_IDL } from "./idl.generated";
 
 /**
  * A small Borsh codec driven by the committed IDL (`idl.generated.ts`), so the program's
@@ -35,7 +35,7 @@ interface IdlEnum {
 }
 
 const TYPES = new Map<string, IdlStruct | IdlEnum>(
-  (RALLY_LAUNCH_IDL.types as unknown as (IdlStruct | IdlEnum)[]).map((t) => [t.name, t]),
+  (RALLY_SOLANA_PROTOCOL_IDL.types as unknown as (IdlStruct | IdlEnum)[]).map((t) => [t.name, t]),
 );
 
 export const camel = (s: string) => s.replace(/_([a-z0-9])/g, (_, c: string) => c.toUpperCase());
@@ -219,7 +219,7 @@ const hex = (b: ArrayLike<number>) => Array.from(b, (x) => x.toString(16).padSta
  * into plausible garbage.
  */
 export function decodeAccount<T>(name: string, data: Uint8Array): T {
-  const acc = RALLY_LAUNCH_IDL.accounts.find((a) => a.name === name);
+  const acc = RALLY_SOLANA_PROTOCOL_IDL.accounts.find((a) => a.name === name);
   if (!acc) throw new RallyError("UNSUPPORTED", `No ${name} account in the bundled IDL`);
   const want = hex(acc.discriminator);
   if (data.length < 8 || hex(data.subarray(0, 8)) !== want) {

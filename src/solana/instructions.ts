@@ -7,13 +7,13 @@ import {
   ASSOCIATED_TOKEN_PROGRAM_ADDRESS,
   DEFAULT_POOL_SEED_INDEX,
   DEFAULT_RENT_BUDGET_LAMPORTS,
-  RALLY_LAUNCH_PROGRAM_ID,
+  RALLY_SOLANA_PROTOCOL_PROGRAM_ID,
   RAYDIUM_CLMM_DEVNET,
   SYSTEM_PROGRAM_ADDRESS,
   TOKEN_2022_PROGRAM_ADDRESS,
 } from "./constants";
 import { SOLANA_DEPLOYMENTS } from "./deployments.generated";
-import { RALLY_LAUNCH_IDL } from "./idl.generated";
+import { RALLY_SOLANA_PROTOCOL_IDL } from "./idl.generated";
 import { findAssociatedTokenAddress, rallyPdas, raydiumPdas, tickArrayStart } from "./pda";
 import type { AddressOrSigner, CurveSegment, FeeConfig, LaunchAccount } from "./types";
 
@@ -55,7 +55,7 @@ function resolveTarget(t: SolanaTarget): Ctx {
   const dep = t.chainId === undefined ? undefined : SOLANA_DEPLOYMENTS[t.chainId];
   const lookupTable = (t.lookupTable ?? dep?.lookupTable) as Address | undefined;
   return {
-    programId: (t.programId ?? dep?.rallyLaunch ?? RALLY_LAUNCH_PROGRAM_ID) as Address,
+    programId: (t.programId ?? dep?.rallySolanaProtocol ?? RALLY_SOLANA_PROTOCOL_PROGRAM_ID) as Address,
     clmm: (t.raydiumClmm ?? dep?.raydiumClmm ?? RAYDIUM_CLMM_DEVNET) as Address,
     ...(lookupTable ? { lookupTable } : {}),
   };
@@ -106,7 +106,7 @@ export function buildRallyInstruction(
   accounts: AccountMap,
   remaining: readonly Address[] = [],
 ): Instruction {
-  const ix = RALLY_LAUNCH_IDL.instructions.find((i) => i.name === name);
+  const ix = RALLY_SOLANA_PROTOCOL_IDL.instructions.find((i) => i.name === name);
   if (!ix) throw new RallyError("UNSUPPORTED", `No instruction ${name} in the bundled IDL`);
   const known = new Set<string>(ix.accounts.map((a) => camel(a.name)));
   for (const k of Object.keys(accounts)) {

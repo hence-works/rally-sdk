@@ -38,8 +38,8 @@ export function chainIdOfCaip2(caip2: string): SolanaChainId | undefined {
 /** Launch tokens are 6dp on Solana (a u64 cannot hold 1e9 tokens at 18dp). */
 export const LAUNCH_TOKEN_DECIMALS = 6;
 
-/** The rally_launch program. Same on every cluster until a mainnet key is chosen. */
-export const RALLY_LAUNCH_PROGRAM_ID: Address = address("7mdwZfoJm6iXj3hWsqsbeqExJV6SZ3EYQWnBqGmKGz76");
+/** The Rally Solana protocol program. Same on every cluster until a mainnet key is chosen. */
+export const RALLY_SOLANA_PROTOCOL_PROGRAM_ID: Address = address("7mdwZfoJm6iXj3hWsqsbeqExJV6SZ3EYQWnBqGmKGz76");
 
 export const TOKEN_PROGRAM_ADDRESS: Address = address("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
 export const TOKEN_2022_PROGRAM_ADDRESS: Address = address("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");

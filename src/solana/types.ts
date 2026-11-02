@@ -5,8 +5,8 @@ export interface SolanaDeployment {
   vm: "svm";
   chainId: number;
   caip2: string;
-  /** The rally_launch program. */
-  rallyLaunch: string;
+  /** The Rally Solana protocol program. */
+  rallySolanaProtocol: string;
   /** The `Config` PDA. */
   config: string;
   /** The protocol address lookup table (what brings `open_pool` under 1232 bytes). */

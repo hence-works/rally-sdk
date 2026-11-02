@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   ASSOCIATED_TOKEN_PROGRAM_ADDRESS,
   CLOCK_SYSVAR_ADDRESS,
-  RALLY_LAUNCH_PROGRAM_ID,
+  RALLY_SOLANA_PROTOCOL_PROGRAM_ID,
   RAYDIUM_CLMM_DEVNET,
   RallyError,
   TOKEN_2022_PROGRAM_ADDRESS,
@@ -55,12 +55,12 @@ describe("buy / sell", () => {
     // 24 IDL accounts, then the remaining tick arrays.
     const idlCount = 24;
     expect(accts.slice(0, idlCount)).toHaveLength(idlCount);
-    expect(accts[5]).toMatchObject({ address: RALLY_LAUNCH_PROGRAM_ID, role: AccountRole.READONLY }); // referral = None
+    expect(accts[5]).toMatchObject({ address: RALLY_SOLANA_PROTOCOL_PROGRAM_ID, role: AccountRole.READONLY }); // referral = None
     expect(accts[12]!.address).toBe(RAYDIUM_CLMM_DEVNET);
     expect(accts[18]!.address).toBe(TOKEN_PROGRAM_ADDRESS);
     expect(accts[19]!.address).toBe(TOKEN_2022_PROGRAM_ADDRESS);
     expect(accts[22]!.address).toBe(await rallyPdas().eventAuthority());
-    expect(accts[23]!.address).toBe(RALLY_LAUNCH_PROGRAM_ID);
+    expect(accts[23]!.address).toBe(RALLY_SOLANA_PROTOCOL_PROGRAM_ID);
     expect(accts.filter((a) => a.role === AccountRole.READONLY_SIGNER || a.role === AccountRole.WRITABLE_SIGNER)).toHaveLength(1);
   });
 
@@ -180,7 +180,7 @@ describe("create_launch", () => {
     // creator is WRITABLE_SIGNER, mint (index 6) is a WRITABLE_SIGNER carrying the keypair signer.
     expect(ix.accounts![0]).toMatchObject({ address: creator, role: AccountRole.WRITABLE_SIGNER });
     expect(ix.accounts![6]).toMatchObject({ address: ground.address, role: AccountRole.WRITABLE_SIGNER, signer: ground.signer });
-    expect(ix.accounts![11]).toMatchObject({ address: RALLY_LAUNCH_PROGRAM_ID, role: AccountRole.READONLY }); // preset None
+    expect(ix.accounts![11]).toMatchObject({ address: RALLY_SOLANA_PROTOCOL_PROGRAM_ID, role: AccountRole.READONLY }); // preset None
   });
 
   it("rejects a mint that sorts above its quote, before anything is pinned or paid", async () => {
@@ -276,12 +276,12 @@ describe("claims, referrals, fee collection", () => {
 
 describe("buildRallyInstruction", () => {
   it("rejects an account name the instruction does not have and a missing required one", () => {
-    expect(() => buildRallyInstruction(RALLY_LAUNCH_PROGRAM_ID, "register_referrer", {}, { nope: addr(1) })).toThrow(/no account/);
-    expect(() => buildRallyInstruction(RALLY_LAUNCH_PROGRAM_ID, "register_referrer", {}, {})).toThrow(/required/);
+    expect(() => buildRallyInstruction(RALLY_SOLANA_PROTOCOL_PROGRAM_ID, "register_referrer", {}, { nope: addr(1) })).toThrow(/no account/);
+    expect(() => buildRallyInstruction(RALLY_SOLANA_PROTOCOL_PROGRAM_ID, "register_referrer", {}, {})).toThrow(/required/);
   });
   it("every instruction in the IDL carries its anchor discriminator", async () => {
-    const { RALLY_LAUNCH_IDL } = await import("../../src/solana");
-    for (const ix of RALLY_LAUNCH_IDL.instructions) {
+    const { RALLY_SOLANA_PROTOCOL_IDL } = await import("../../src/solana");
+    for (const ix of RALLY_SOLANA_PROTOCOL_IDL.instructions) {
       expect([...ix.discriminator], ix.name).toEqual(ixDisc(ix.name));
     }
   });

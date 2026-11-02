@@ -547,7 +547,7 @@ that aggregated trading is off there rather than an error; the helpers throw
 
 ## Solana
 
-Rally also runs on Solana (the `rally_launch` Anchor program over Raydium CLMM). It lives
+Rally also runs on Solana (the Rally Solana protocol, an Anchor program over Raydium CLMM). It lives
 behind a subpath so EVM-only integrators install nothing new:
 
 ```sh

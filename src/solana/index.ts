@@ -1,6 +1,6 @@
 /**
- * @rally-fun/sdk/solana: launch and trade Rally coins on Solana (the `rally_launch`
- * Anchor program over Raydium CLMM).
+ * @rally-fun/sdk/solana: launch and trade Rally coins on Solana (the Rally Solana
+ * protocol, an Anchor program over Raydium CLMM).
  *
  *   import { grindMint, prepareCreateLaunch, prepareOpenPool, WSOL_MINT } from "@rally-fun/sdk/solana";
  *
@@ -60,6 +60,6 @@ export type {
 } from "./instructions";
 export { SOLANA_DEPLOYMENTS } from "./deployments.generated";
 export { getSolanaDeployment } from "./deployments";
-export { RALLY_LAUNCH_IDL } from "./idl.generated";
+export { RALLY_SOLANA_PROTOCOL_IDL } from "./idl.generated";
 export { RallyError, isRallyError } from "../errors";
 export type { RallyErrorCode } from "../errors";

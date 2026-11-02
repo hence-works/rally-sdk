@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import {
-  RALLY_LAUNCH_PROGRAM_ID,
+  RALLY_SOLANA_PROTOCOL_PROGRAM_ID,
   RallyError,
   decodeConfig,
   decodeLaunch,
@@ -114,9 +114,9 @@ describe("Raydium pool state", () => {
 describe("fetch helpers", () => {
   it("fetchLaunch checks the owner program", async () => {
     const mint = addr(1);
-    const at = await rallyPdas(RALLY_LAUNCH_PROGRAM_ID).launch(mint);
+    const at = await rallyPdas(RALLY_SOLANA_PROTOCOL_PROGRAM_ID).launch(mint);
     const data = launchBytes(disc("Launch"));
-    const ok = fakeRpc({ [at]: { data, owner: RALLY_LAUNCH_PROGRAM_ID } });
+    const ok = fakeRpc({ [at]: { data, owner: RALLY_SOLANA_PROTOCOL_PROGRAM_ID } });
     expect((await fetchLaunch(ok, mint)).creator).toBe(addr(2));
     const spoofed = fakeRpc({ [at]: { data, owner: addr(9) } });
     await expect(fetchLaunch(spoofed, mint)).rejects.toThrow(/owned by/);

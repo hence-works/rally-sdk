@@ -8,7 +8,7 @@ export const SOLANA_DEPLOYMENTS: Record<number, SolanaDeployment> = {
     "vm": "svm",
     "chainId": 7565165,
     "caip2": "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1",
-    "rallyLaunch": "7mdwZfoJm6iXj3hWsqsbeqExJV6SZ3EYQWnBqGmKGz76",
+    "rallySolanaProtocol": "7mdwZfoJm6iXj3hWsqsbeqExJV6SZ3EYQWnBqGmKGz76",
     "config": "2r9T3zLRmYtxvyRUBr6yNXs5xe8tRuFYxqgwevuCx9ZR",
     "lookupTable": "8VsUtTtjvCiJ3rWEwqS94g4hJcDcAH2jUWYqkBcgF52N",
     "raydiumClmm": "DRayAUgENGQBKVaX8owNhgzkEDyoHTGVEGHVJT1E9pfH",
