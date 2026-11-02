@@ -333,7 +333,15 @@ describe("generationsOf", () => {
     expect(gens[0]!.lens).toBe(LENS);
     // And the coin-facing lookup answers with it, which is what gates every per-pool read.
     expect(generationForHook({ ...CURRENT_ONLY, v2Deployments: [
-      { launchHook: HOOK_V2, rallyRouter: ROUTER_V2, lens: LENS, deploymentBlock: 100 },
+      {
+        launchHook: HOOK_V2,
+        rallyFactory: FACTORY_V2,
+        rallyRouter: ROUTER_V2,
+        paramRegistry: REGISTRY_V2,
+        launchLib: LAUNCHLIB_V2,
+        lens: LENS,
+        deploymentBlock: 100,
+      },
     ] }, HOOK_V2)?.lens).toBe(LENS);
   });
 

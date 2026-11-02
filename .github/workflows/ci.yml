@@ -1,0 +1,64 @@
+# CI for @rally-fun/sdk as a standalone repo.
+#
+# The SDK has no lockfile here: inside the monorepo its yarn.lock pins it. A standalone
+# install therefore resolves the newest versions its ranges allow, which is what an
+# integrator installing the published package gets.
+#
+# check:deployments is not run here. It compares the baked deployments against the
+# sibling rally-protocol and rally-solana checkouts, which exist only in the monorepo;
+# that drift is guarded there, by check-sdk-ref.yml and prepublishOnly.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        # engines: node >= 20
+        node: [20, 22]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - run: npm install --no-package-lock --no-audit --no-fund
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+
+      # Install the packed tarball the way an integrator would, outside this tree, and
+      # load both entry points in both module systems. Catches an exports map, a
+      # files list or a dual-build mistake that the in-tree tests cannot see.
+      - name: Tarball smoke test
+        run: |
+          tarball="$PWD/$(npm pack --silent)"
+          smoke="$RUNNER_TEMP/smoke"
+          mkdir -p "$smoke" && cd "$smoke"
+          npm init -y >/dev/null
+          npm install --no-audit --no-fund "$tarball" viem @solana/kit
+          node --input-type=module -e '
+            const evm = await import("@rally-fun/sdk");
+            const sol = await import("@rally-fun/sdk/solana");
+            if (typeof sol.grindMint !== "function") throw new Error("solana ESM entry incomplete");
+            if (sol.RallyError !== evm.RallyError) throw new Error("RallyError differs across ESM entries");
+            if (!sol.getSolanaDeployment(7565165)) throw new Error("devnet deployment not baked");
+            console.log("esm ok:", Object.keys(evm).length, "evm exports,", Object.keys(sol).length, "solana exports");
+          '
+          node -e '
+            const evm = require("@rally-fun/sdk");
+            const sol = require("@rally-fun/sdk/solana");
+            if (sol.RallyError !== evm.RallyError) throw new Error("RallyError differs across CJS entries");
+            console.log("cjs ok");
+          '
