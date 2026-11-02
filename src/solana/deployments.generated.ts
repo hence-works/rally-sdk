@@ -4,5 +4,32 @@
 import type { SolanaDeployment } from "./types";
 
 export const SOLANA_DEPLOYMENTS: Record<number, SolanaDeployment> = {
-
+  7565165: {
+    "vm": "svm",
+    "chainId": 7565165,
+    "caip2": "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1",
+    "rallyLaunch": "7mdwZfoJm6iXj3hWsqsbeqExJV6SZ3EYQWnBqGmKGz76",
+    "config": "2r9T3zLRmYtxvyRUBr6yNXs5xe8tRuFYxqgwevuCx9ZR",
+    "lookupTable": "8VsUtTtjvCiJ3rWEwqS94g4hJcDcAH2jUWYqkBcgF52N",
+    "raydiumClmm": "DRayAUgENGQBKVaX8owNhgzkEDyoHTGVEGHVJT1E9pfH",
+    "raydiumAmmConfig": "CD4aJtX11cqTCAc83nxSPkkh5JW2yjD6uwHeovjqQ1qu",
+    "quotes": [
+      {
+        "mint": "So11111111111111111111111111111111111111112",
+        "quoteConfig": "7E2ipAXfWjX27tHhAYG5JXcguGTdVStB8W1fWyDmFXdE",
+        "quoteVault": "9sgNggenhpurB6ZbMfu3tUB5dfXQPBvNTSyveZTrxWdA",
+        "ammConfig": "CD4aJtX11cqTCAc83nxSPkkh5JW2yjD6uwHeovjqQ1qu",
+        "gradThreshold": "85000000000",
+        "launchFee": "20000000"
+      },
+      {
+        "mint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+        "quoteConfig": "Q3dzBAUaVqLKVjKvpvenuf2PPxhDNrSxrhjh5ssMuJg",
+        "quoteVault": "Bs9EixZyXAzSruqqVBwq9F6ndP1YZvgGtsZRwh41K8Td",
+        "ammConfig": "CD4aJtX11cqTCAc83nxSPkkh5JW2yjD6uwHeovjqQ1qu",
+        "gradThreshold": "15000000000",
+        "launchFee": "5000000"
+      }
+    ]
+  },
 };
