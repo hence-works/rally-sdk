@@ -17,9 +17,34 @@ export * from "./constants";
 export * from "./types";
 export { normalizeAddress, normalizeAddressForChain, normalizeSolanaAddress, sortsBelow } from "./address";
 export { rallyPdas, raydiumPdas, findAssociatedTokenAddress, tickArrayStart } from "./pda";
-export { grindMint } from "./mint";
+export { grindMint, MAX_MINT_SUFFIX_LENGTH } from "./mint";
 export type { GrindMintOptions, GroundMint } from "./mint";
 export { priceScale, priceWadFromSqrtPriceX64 } from "./price";
+export {
+  applySlippage,
+  applySlippageExactOut,
+  quoteBuyExactOutSolana,
+  quoteSellExactOutSolana,
+  quoteExactOutFromState,
+  quoteBuySolana,
+  quoteFirstBuy,
+  quoteSellSolana,
+  quoteSwapFromState,
+  routerFeeBpsAt,
+} from "./quote";
+export type {
+  FirstBuyQuote,
+  QuoteFirstBuyParams,
+  QuoteStateInput,
+  QuoteExactOutStateInput,
+  QuoteExactOutParams,
+  QuoteSwapParams,
+  SolanaQuoteRpc,
+  SolanaSwapQuote,
+} from "./quote";
+export { buildCurve, planFirstBuy, presetSegments, sqrtPriceAfterBuy } from "./curve";
+export type { BuildCurveParams, CurveLayout, FirstBuyPlan, PlannedPosition } from "./curve";
+export { getSqrtPriceAtTick, getTickAtSqrtPrice } from "./clmm";
 export {
   decodeConfig,
   decodeLaunch,
@@ -33,12 +58,19 @@ export {
   fetchPoolSlot0,
   fetchQuoteConfig,
   fetchReferral,
+  fetchFeeBeneficiary,
 } from "./accounts";
-export type { PoolSlot0, ReadOptions, SolanaRpc } from "./accounts";
+export type { PoolSlot0, ReadOptions, SolanaRpc, FeeBeneficiaryRpc, FeeBeneficiaryState } from "./accounts";
 export {
   buildRallyInstruction,
   createAtaIdempotentInstruction,
   prepareBuy,
+  prepareBuyExactOut,
+  prepareSellExactOut,
+  prepareRegisterFeeBeneficiary,
+  prepareSetCreatorClaimEscrow,
+  prepareExtendAccount,
+  prepareMigrateReferral,
   prepareClaimCreatorFees,
   prepareClaimReferralFees,
   prepareCollectFees,
@@ -55,6 +87,7 @@ export type {
   PrepareOpenPoolParams,
   PrepareReferralParams,
   PrepareSwapParams,
+  PrepareExactOutSwapParams,
   PreparedSolanaTransaction,
   SolanaTarget,
 } from "./instructions";

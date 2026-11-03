@@ -187,6 +187,13 @@ export interface V2Deployment extends GenerationRecord {
    * read through the lens belonging to the hook it launched under.
    */
   lens?: Address;
+  /**
+   * `RallyFeeBeneficiary`, the ERC-721 ("Rally Creator Fees", token id = pool id) that holds
+   * title to a launch's creator-fee stream. One per hook. Absent when the manifest predates it.
+   */
+  feeBeneficiary?: Address;
+  /** Block it was deployed at, the floor for scanning its `Transfer` logs. */
+  feeBeneficiaryBlock?: number;
   rallyVault?: Address;
   dividendDistributor?: Address;
   /** That generation's capped governor. See the chain-level field of the same name. */
@@ -260,6 +267,12 @@ export interface HookGeneration {
   /** v2 only: `RallyLensU4`, where every per-pool read lives. Absent means this SDK
    *  version's manifest predates the lens, and v2 state cannot be read for it. */
   lens?: Address;
+  /**
+   * v2 only: this generation's `RallyFeeBeneficiary` (creator-fee NFT). Protocol-v1 hooks have
+   * none: their coins always pay the original creator. Not filled from another generation.
+   */
+  feeBeneficiary?: Address;
+  feeBeneficiaryBlock?: number;
   /** Absent for a generation deployed before the creation path split out of the hook. */
   rallyFactory?: Address;
   /** The registry this generation's hook reads its params from. */

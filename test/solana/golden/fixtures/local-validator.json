@@ -1,0 +1,953 @@
+{
+ "meta": {
+  "program": "7mdwZfoJm6iXj3hWsqsbeqExJV6SZ3EYQWnBqGmKGz76",
+  "raydiumClmm": "DRayAUgENGQBKVaX8owNhgzkEDyoHTGVEGHVJT1E9pfH",
+  "source": "test/solana/golden/harness.ts against the devnet-deployed program, cloned into a local validator",
+  "mint": "N1LPRUgAGYnYDLRqSapFirVzzq4Dybmk2NSYTkKyvR3"
+ },
+ "firstBuy": {
+  "firstBuyTokens": "10000000000000",
+  "quoteCost": "213726508",
+  "tokensOut": "9999999999999",
+  "programQuoteIn": "213726508",
+  "programTokensOut": "9999999999999",
+  "exactMaxAccepted": true,
+  "oneLessRejected": "{\"InstructionError\":[\"2\",{\"Custom\":\"6030\"}]}",
+  "oneLessLog": "Program log: AnchorError thrown in programs/rally-solana-protocol/src/instructions/open_pool.rs:156. Error Code: FirstBuySlippage. Error Number: 6030. Error Message: First buy costs more than the creator's limit."
+ },
+ "outsideLiquidityWithoutQuote": {
+  "withoutQuoteErr": "{\"InstructionError\":[\"2\",{\"Custom\":\"6024\"}]}",
+  "log": "Program log: AnchorError thrown in programs/amm/src/instructions/swap.rs:554. Error Code: InvalidFirstTickArrayAccount. Error Number: 6024. Error Message: Invalid first tick array account."
+ },
+ "snapshots": {
+  "fresh": {
+   "launch": "Cj3xYFWkpjxGgov9sLorVVkP84Aphf338zwSTrRz7bY",
+   "pool": "8qbtdn6MQAjV8QdpgLba6WyYxp875HmEVMzAgaoGoURs",
+   "accounts": {
+    "Cj3xYFWkpjxGgov9sLorVVkP84Aphf338zwSTrRz7bY": {
+     "owner": "7mdwZfoJm6iXj3hWsqsbeqExJV6SZ3EYQWnBqGmKGz76",
+     "data": "H4sIAAAAAAAAA5tgbLz4XOhVtb//GRlYEyfrzb72ZMHnWVtvcGvfqtU/I3t7wuHmBh4BZjXXBKdlejLJK/Y4lr1do+R/Iuqa9bE4+WgLj/6gyQtPhu4OvJJ9nW12R/i/1Y0tvzPqk90kDpjeOmJ5R+q1deiMBR8YGBgYGEtKlT23X1fZY85/76Tl55THXxj7jpisDpzS5bXB84ZVLN+y9ol2IlMr/CxWym7YZi9Y4PXUqvPYx2l7jppnrpSZZa+zfMuLLJBBm6E0DHRE//u/4Oa//wxCqaeEQQINx5bU9TIzGDofd6i4zsRw3uZ/Mts2BgaGBUV+EpwMDAv4QfgCe4Q0A8MF9hfMDGvUUhjkQAYJF4gLqDMQCZj0PhsyaOUeYV7E08u+tPKae5L48TjG4ytmCKb9fWnIN0ML5q7Tyzhm67IQaywDw5QnM1/E3KznXx0neCHA2y2nQz4hRnfFr/yZXO6Nwi+U3EBm7jnCxiBdeqPLhARzR8EooC0AANRueRtOBAAA"
+    },
+    "8qbtdn6MQAjV8QdpgLba6WyYxp875HmEVMzAgaoGoURs": {
+     "owner": "DRayAUgENGQBKVaX8owNhgzkEDyoHTGVEGHVJT1E9pfH",
+     "data": "H4sIAAAAAAAAA/v+9vHX64fvuf1d1j7RTmRqhZ/FStkN2+wFC7yeWnUe+zhtz1HzzJUys+x1eqom/J/BdUn3bPKfXZtuBTi4/2LMPZ9zVHWSS56oU6B2LGviZL3Z154s+Dxr6w1u7Vu1+mdkb0843NzAI8Cs5prgtIxtdkf4v9WNLb8z6pPdJA6Y3jpieUfqtXXojAUfGBgYGBhnR/bqbHyzlMvanDdr6dSSmPpaKzbDBr6UosVPN6m9npAsKHHDJVkt1St0muGXm4KLnX6dZa/na8rL8bp0Zv80g4+x1rqmLUpJkY8TG47vtnq2/EVPceWj5GUL7czcnoQY7z/szMZpw3B6GcdsXRYGOLgg19vl0mjACOMHxvz7zzAQgImRCEU0BIQid2BdhwRGHYoFsHBgCGGKjIJRgAcAANWindwIBgAA"
+    },
+    "CD4aJtX11cqTCAc83nxSPkkh5JW2yjD6uwHeovjqQ1qu": {
+     "owner": "DRayAUgENGQBKVaX8owNhgzkEDyoHTGVEGHVJT1E9pfH",
+     "data": "H4sIAAAAAAAAA7v1RTHj9Gnt/N8MDDtmTK+1KvRwui3+vTVSv2+rvfXSYwIzF197acLPO1mtqvLAFUaGI5wMDDYMDnMYwICQDgYcAAB95LMWdQAAAA=="
+    },
+    "DZejFHa478M8qL7YRrLoo6EuyPGcrBXjkrXSY9uiUjQb": {
+     "owner": "DRayAUgENGQBKVaX8owNhgzkEDyoHTGVEGHVJT1E9pfH",
+     "data": "H4sIAAAAAAAAA+3NoQ4BAQDGcbcJEq9gI9kEm814g9MEhWkegQfQTJC068qVa4ogKGYySfEIFOVOEGxeQPD7tf9Xvl3UPzWes9pkWgk35+q2Vboe2vfx7REs9824t1p0k/DSGRXLgzTLAX9jPkyz47oQ1fOf7bsBAAAAAAAAAIC34AefL5AC/wQAKAAA"
+    },
+    "FYEBsmZXTabwNpbuhA8F3tXnHFFUXuHZYcAHYW94bzRZ": {
+     "owner": "DRayAUgENGQBKVaX8owNhgzkEDyoHTGVEGHVJT1E9pfH",
+     "data": "H4sIAAAAAAAAA+3OoQ5BAQCFYbeYxAOIKJrNZrwBiSAq5hF4AFWQNEVXNEUQFAHRVWxmUwWKcq/qDdh8X/zLOetpe1d6DYv9Qa6+POZXlcx5W330rs9gvCnPW5NRY1EPa530IoziBPyw2SmKm/vDPfnRbtlLoZv64ikAAAAAAAAAAOAvBF/YfANxJSW8ACgAAA=="
+    },
+    "EUwxyfi74etW3JUa25rF2iwHFaxsFx2dcXKEkJpFJR2C": {
+     "owner": "DRayAUgENGQBKVaX8owNhgzkEDyoHTGVEGHVJT1E9pfH",
+     "data": "H4sIAAAAAAAAA+3OIQrCAABA0Q1kUQ9gVBBswkD0BrMZjDaP4A5gXTDZPIJlzbKgsCJidskinkCLGLR5hZX3LvD/YTu7DN6r/jLtJPtrtxi2bqfRc3F/hesy3k032SRPqvG8mR+jAACgLkUZBY+sl54/3792WmVxo+4zAAAAAAAAAAiCsIbmD6bICCsAKAAA"
+    }
+   }
+  },
+  "moved": {
+   "launch": "Cj3xYFWkpjxGgov9sLorVVkP84Aphf338zwSTrRz7bY",
+   "pool": "8qbtdn6MQAjV8QdpgLba6WyYxp875HmEVMzAgaoGoURs",
+   "accounts": {
+    "Cj3xYFWkpjxGgov9sLorVVkP84Aphf338zwSTrRz7bY": {
+     "owner": "7mdwZfoJm6iXj3hWsqsbeqExJV6SZ3EYQWnBqGmKGz76",
+     "data": "H4sIAAAAAAAAA5tgbLz4XOhVtb//GRlYEyfrzb72ZMHnWVtvcGvfqtU/I3t7wuHmBh4BZjXXBKdlejLJK/Y4lr1do+R/Iuqa9bE4+WgLj/6gyQtPhu4OvJJ9nW12R/i/1Y0tvzPqk90kDpjeOmJ5R+q1deiMBR8YGBgYGEtKlT23X1fZY85/76Tl55THXxj7jpisDpzS5bXB84ZVLN+y9ol2IlMr/CxWym7YZi9Y4PXUqvPYx2l7jppnrpSZZa+zfMuLLJBBm6E0DHRE//u/4Oa//wxCqaeEQQINx5bU9TIzGDofd6i4zsRw3uZ/Mts2BgaGBUV+EpwMDAv4QfgCe4Q0A8MF9hfMDGvUUhjkQAYJF4gLqDdMm4FsOgOM7+DtA6ErahlBNJPeZ0MGrdwjzIt4etmXVl5zTxI/Hsd4fMUMwbS/Lw35ZmjB3HV6GcdsXRYGosGUJzNfxNys518dJ3ghwNstp0M+IUZ3xa/8mVzujcIvlNxAZu45wsYgXXqjy4QEc0fBKKAtAADXqTn9TgQAAA=="
+    },
+    "8qbtdn6MQAjV8QdpgLba6WyYxp875HmEVMzAgaoGoURs": {
+     "owner": "DRayAUgENGQBKVaX8owNhgzkEDyoHTGVEGHVJT1E9pfH",
+     "data": "H4sIAAAAAAAAA/v+9vHX64fvuf1d1j7RTmRqhZ/FStkN2+wFC7yeWnUe+zhtz1HzzJUys+x1eqom/J/BdUn3bPKfXZtuBTi4/2LMPZ9zVHWSS56oU6B2LGviZL3Z154s+Dxr6w1u7Vu1+mdkb0843NzAI8Cs5prgtIxtdkf4v9WNLb8z6pPdJA6Y3jpieUfqtXXojAUfGBgYGBhnR/bqbHyzlMvanDdr6dSSmPpaKzbDBr6UosVPN6m9npAsKHHDJVkt1St0muGXm4KLnX6dZa/na8rL8bp0Zv80g4+x1rqmLUpJkY8TG47vtnq2/EVPceWj5GUL7czcnoQY7z/szMZpw3B6GcdsXRYGOPg/U/75lo9ljDD+5Jx//xmwgD3pYp3fVDHFT6wQw6acdMDESIQiGgJCkTuwrkMCow7FAlg4MIQwRagEZvSy08roUTCAAABQU+YjCAYAAA=="
+    },
+    "CD4aJtX11cqTCAc83nxSPkkh5JW2yjD6uwHeovjqQ1qu": {
+     "owner": "DRayAUgENGQBKVaX8owNhgzkEDyoHTGVEGHVJT1E9pfH",
+     "data": "H4sIAAAAAAAAA7v1RTHj9Gnt/N8MDDtmTK+1KvRwui3+vTVSv2+rvfXSYwIzF197acLPO1mtqvLAFUaGI5wMDDYMDnMYwICQDgYcAAB95LMWdQAAAA=="
+    },
+    "DZejFHa478M8qL7YRrLoo6EuyPGcrBXjkrXSY9uiUjQb": {
+     "owner": "DRayAUgENGQBKVaX8owNhgzkEDyoHTGVEGHVJT1E9pfH",
+     "data": "H4sIAAAAAAAAA+3NoQ4BAQDGcbcJEq9gI9kEm814g9MEhWkegQfQTJC068qVa4ogKGYySfEIFOVOEGxeQPD7tf9Xvl3UPzWes9pkWgk35+q2Vboe2vfx7REs9824t1p0k/DSGRXLgzTLAX9jPkyz47oQ1fOf7bsBAAAAAAAAAIC34AefL5AC/wQAKAAA"
+    },
+    "FYEBsmZXTabwNpbuhA8F3tXnHFFUXuHZYcAHYW94bzRZ": {
+     "owner": "DRayAUgENGQBKVaX8owNhgzkEDyoHTGVEGHVJT1E9pfH",
+     "data": "H4sIAAAAAAAAA+3OoQ5BAQCFYbeYxAOIKJrNZrwBiSAq5hF4AFWQNEVXNEUQFAHRVWxmUwWKcq/qDdh8X/zLOetpe1d6DYv9Qa6+POZXlcx5W330rs9gvCnPW5NRY1EPa530IoziBPyw2SmKm/vDPfnRbtlLoZv64ikAAAAAAAAAAOAvBF/YfANxJSW8ACgAAA=="
+    },
+    "EUwxyfi74etW3JUa25rF2iwHFaxsFx2dcXKEkJpFJR2C": {
+     "owner": "DRayAUgENGQBKVaX8owNhgzkEDyoHTGVEGHVJT1E9pfH",
+     "data": "H4sIAAAAAAAAA+3OIQrCAABA0Q1kUQ9gVBBswkD0BrMZjDaP4A5gXTDZPIJlzbKgsCJidskinkCLGLR5hZX3LvD/YTu7DN6r/jLtJPtrtxi2bqfRc3F/hesy3k032SRPqvG8mR+jAACgLkUZBY+sl54/3792WmVxo+4zAAAAAAAAAAiCsIbmD6bICCsAKAAA"
+    }
+   }
+  },
+  "outside-lp": {
+   "launch": "Cj3xYFWkpjxGgov9sLorVVkP84Aphf338zwSTrRz7bY",
+   "pool": "8qbtdn6MQAjV8QdpgLba6WyYxp875HmEVMzAgaoGoURs",
+   "accounts": {
+    "Cj3xYFWkpjxGgov9sLorVVkP84Aphf338zwSTrRz7bY": {
+     "owner": "7mdwZfoJm6iXj3hWsqsbeqExJV6SZ3EYQWnBqGmKGz76",
+     "data": "H4sIAAAAAAAAA5tgbLz4XOhVtb//GRlYEyfrzb72ZMHnWVtvcGvfqtU/I3t7wuHmBh4BZjXXBKdlejLJK/Y4lr1do+R/Iuqa9bE4+WgLj/6gyQtPhu4OvJJ9nW12R/i/1Y0tvzPqk90kDpjeOmJ5R+q1deiMBR8YGBgYGEtKlT23X1fZY85/76Tl55THXxj7jpisDpzS5bXB84ZVLN+y9ol2IlMr/CxWym7YZi9Y4PXUqvPYx2l7jppnrpSZZa+zfMuLLJBBm6E0DHRE//u/4Oa//wxCqaeEQQINx5bU9TIzGDofd6i4zsRw3uZ/Mts2BgaGBUV+EpwMDAv4QfgCe4Q0A8MF9hfMDGvUUhjkQAYJF4gLqDdMm4FsOgOM7+DtA6ErahlBNJPeZ0MGrdwjzIt4etmXVl5zTxI/Hsd4fMUMwbS/Lw35ZmjB3HV6GcdsXRYGosGUJzNfxNys518dJ3ghwNstp0M+IUZ3xa/8mVzujcIvlNxAZu45wsYgXXqjy4QEc0fBKKAtAADXqTn9TgQAAA=="
+    },
+    "8qbtdn6MQAjV8QdpgLba6WyYxp875HmEVMzAgaoGoURs": {
+     "owner": "DRayAUgENGQBKVaX8owNhgzkEDyoHTGVEGHVJT1E9pfH",
+     "data": "H4sIAAAAAAAAA/v+9vHX64fvuf1d1j7RTmRqhZ/FStkN2+wFC7yeWnUe+zhtz1HzzJUys+x1eqom/J/BdUn3bPKfXZtuBTi4/2LMPZ9zVHWSS56oU6B2LGviZL3Z154s+Dxr6w1u7Vu1+mdkb0843NzAI8Cs5prgtIxtdkf4v9WNLb8z6pPdJA6Y3jpieUfqtXXojAUfGBgYGBhnR/bqbHyzlMvanDdr6dSSmPpaKzbDBr6UosVPN6m9npAsKHHDJVkt1St0muGXm4KLnX6dZa/na8rL8bp0Zv80g4+x1rqmLUpJkY8TG47vtnq2/EVPceWj5GUL7czcnoQY7z/szMZpw3C67Jt2DAsDHPyfKf98y8cyRhh/cs6//wxYwJ50sc5vqpjiJ1aIYVNOOmBiJEIRDQGhyB1Y1yGBUYdiATmcGEIc1DQfGczoZaeV0aNgAAEAYQjfFAgGAAA="
+    },
+    "CD4aJtX11cqTCAc83nxSPkkh5JW2yjD6uwHeovjqQ1qu": {
+     "owner": "DRayAUgENGQBKVaX8owNhgzkEDyoHTGVEGHVJT1E9pfH",
+     "data": "H4sIAAAAAAAAA7v1RTHj9Gnt/N8MDDtmTK+1KvRwui3+vTVSv2+rvfXSYwIzF197acLPO1mtqvLAFUaGI5wMDDYMDnMYwICQDgYcAAB95LMWdQAAAA=="
+    },
+    "DZejFHa478M8qL7YRrLoo6EuyPGcrBXjkrXSY9uiUjQb": {
+     "owner": "DRayAUgENGQBKVaX8owNhgzkEDyoHTGVEGHVJT1E9pfH",
+     "data": "H4sIAAAAAAAAA+3NoQ4BAQDGcbcJEq9gI9kEm814g9MEhWkegQfQTJC068qVa4ogKGYySfEIFOVOEGxeQPD7tf9Xvl3UPzWes9pkWgk35+q2Vboe2vfx7REs9824t1p0k/DSGRXLgzTLAX9jPkyz47oQ1fOf7bsBAAAAAAAAAIC34AefL5AC/wQAKAAA"
+    },
+    "9G8S7sDkDeE8uYsoq7Wmbu4KqXByEe1FWjpWhJ1Wtpkx": {
+     "owner": "DRayAUgENGQBKVaX8owNhgzkEDyoHTGVEGHVJT1E9pfH",
+     "data": "H4sIAAAAAAAAAzswO/Ss4c9GrZJSZc/t11X2mPPfO2n5OeXxF8a+IyarA6d0eW3wvGEVy2eQ8e8/wygYBaNgFIyCUTAKRsEoGAV0BB+y//1nuPB2gh6yIDofDexJF+v8pkp7t42CUTBUgEzuv/8MBkL5F/8jAKF8NApGwSgYBaNgFIyCUTAKRsEoGAWjYBSMglEwCkbBKBgFo2AUjIJRMApIB0wDYCcA1GEPfgAoAAA="
+    },
+    "HWHiQsAdZp9ojjze4f6WgffHD2qMW6F4uFLHKShYznGU": {
+     "owner": "DRayAUgENGQBKVaX8owNhgzkEDyoHTGVEGHVJT1E9pfH",
+     "data": "H4sIAAAAAAAAA+3NoQ4BAQDG8bts4yFIms1meIKTCBev3SOcB7BJgqSpmnLtiiBcuSCTFI9AUTDNvIDg99v+4Uvffh0fOvdZO5s2o+LY2vUa56p/TS+3cFl2t5PVYpRHp0FSH88fz3dBNtzUgg/fGwAAAAAAAAAAAP5M+IPPFxPHk18AKAAA"
+    },
+    "8QaQveJXCuEv3mfSdD9QmfrbxXg5curARxijBDYqJSHK": {
+     "owner": "DRayAUgENGQBKVaX8owNhgzkEDyoHTGVEGHVJT1E9pfH",
+     "data": "H4sIAAAAAAAAA+3OoQ4BAQCA4bts4yFImu02wxPQBMlsgkc4D6CaCaYpgqZoiiBcEWSS4hFcUe5Emwdw5fte4P/Pm8G18Z7V42m1e7zVTs3K49J6TZ5puEyifX897x269/aoPF5leQAAAAAAAAAAAAB/FG2zPFgkwzT/CuLOrlT02I+wgOYHIlphewAoAAA="
+    },
+    "7cjWoVhhjh6A1spMPDj2faQi3r3cCWqpsrrD3uD913Uu": {
+     "owner": "DRayAUgENGQBKVaX8owNhgzkEDyoHTGVEGHVJT1E9pfH",
+     "data": "H4sIAAAAAAAAA+3NoQ4BAQDG8bsi8hAnaTab8QanCaJ2j3DXqYKkeQRm2pULgnLhMknxCBSbYZp5AcHvt/3Dl77dclS1b9NWmkVxfmgW3cap7F2S8zWc7zur4WI22MbH/rg+2Tye74J1dK8FH743AAAAAAAAAAAA/JnwB58vVQs/ugAoAAA="
+    },
+    "FYEBsmZXTabwNpbuhA8F3tXnHFFUXuHZYcAHYW94bzRZ": {
+     "owner": "DRayAUgENGQBKVaX8owNhgzkEDyoHTGVEGHVJT1E9pfH",
+     "data": "H4sIAAAAAAAAA+3OoQ4BAQCAYbcJEu9wJM1mM96ARBA1RecBVEHSFJ2gKYJgM0F2imLzAqcod6o3OLPve4H/Pyz7l9p7Wh1Pyu3dtbJvlO7nZjx8vIL5sb7uLWadbTtqDYrbKElz8MNWtyTthps4/fI85cNRIeszAAAAAAAAAADg3wUZND+tKVSzACgAAA=="
+    },
+    "EUwxyfi74etW3JUa25rF2iwHFaxsFx2dcXKEkJpFJR2C": {
+     "owner": "DRayAUgENGQBKVaX8owNhgzkEDyoHTGVEGHVJT1E9pfH",
+     "data": "H4sIAAAAAAAAA+3OIQrCAABA0Q1kUQ9gVBBswkD0BrMZjDaP4A5gXTDZPIJlzbKgsCJidskinkCLGLR5hZX3LvD/YTu7DN6r/jLtJPtrtxi2bqfRc3F/hesy3k032SRPqvG8mR+jAACgLkUZBY+sl54/3792WmVxo+4zAAAAAAAAAAiCsIbmD6bICCsAKAAA"
+    }
+   }
+  },
+  "breakout": {
+   "launch": "Cj3xYFWkpjxGgov9sLorVVkP84Aphf338zwSTrRz7bY",
+   "pool": "8qbtdn6MQAjV8QdpgLba6WyYxp875HmEVMzAgaoGoURs",
+   "accounts": {
+    "Cj3xYFWkpjxGgov9sLorVVkP84Aphf338zwSTrRz7bY": {
+     "owner": "7mdwZfoJm6iXj3hWsqsbeqExJV6SZ3EYQWnBqGmKGz76",
+     "data": "H4sIAAAAAAAAA5tgbLz4XOhVtb//mRhYEyfrzb72ZMHnWVtvcGvfqtU/I3t7wuHmBh4BZjXXBKdlejLJK/Y4lr1do+R/Iuqa9bE4+WgLj/6gyQtPhu4OvJJ9nW12R/i/1Y0tvzPqk90kDpjeOmJ5R+q1deiMBR8YGBgYGEtKlT23X1fZY85/76Tl55THXxj7jpisDpzS5bXB84ZVLN+y9ol2IlMr/CxWym7YZi9Y4PXUqvPYx2l7jppnrpSZZa+zfMuLLJBBm6H0XSjdEf3v/4Kb//4zCKWeEgYJNBxbUtfLzGDofNyh4joTw3mb/8ls2xgYGBYU+UlwMjAs4AfhC+wR0gwMF9hfMDOsUUthkAMZJFwgLqDekLYabAoMwPgOm69ygukGHUMQzaT32ZBBK/cI8yKeXvalldfck8SPxzEeXzFDMO3vS0O+GVowd51exjFbl4WBaDDlycwXMTfr+VfHCV4I8HbL6ZBPiNFd8St/Jpd7o/ALJTeQmXuOsDFIl97oMiHB3FEwCmgLAAYdbQtOBAAA"
+    },
+    "8qbtdn6MQAjV8QdpgLba6WyYxp875HmEVMzAgaoGoURs": {
+     "owner": "DRayAUgENGQBKVaX8owNhgzkEDyoHTGVEGHVJT1E9pfH",
+     "data": "H4sIAAAAAAAAA/v+9vHX64fvuf1d1j7RTmRqhZ/FStkN2+wFC7yeWnUe+zhtz1HzzJUys+x1eqom/J/BdUn3bPKfXZtuBTi4/2LMPZ9zVHWSS56oU6B2LGviZL3Z154s+Dxr6w1u7Vu1+mdkb0843NzAI8Cs5prgtIxtdkf4v9WNLb8z6pPdJA6Y3jpieUfqtXXojAUfGBgYGBhnR/bqbHyzlMvanDdr6dSSmPpaKzbDBr6UosVPN6m9npAsKHHDJVkt1St0muGXm4KLnX6dZa/na8rL8bp0Zv80g4+x1rqmLUpJkY8TG47vtnq2/EVPceWj5GUL7czcnoQY7z/szMZpwyBdeqPLhIUBDtyqQ3s/65pzwfjBLP//M2ABvt3T/4bcZcEQP3bwNRM29SQDJkaqGEM2IBS5A+s6JDDqUCwghxNDiIOa5iODaQ4/aWX0KBhAAADEq83iCAYAAA=="
+    },
+    "CD4aJtX11cqTCAc83nxSPkkh5JW2yjD6uwHeovjqQ1qu": {
+     "owner": "DRayAUgENGQBKVaX8owNhgzkEDyoHTGVEGHVJT1E9pfH",
+     "data": "H4sIAAAAAAAAA7v1RTHj9Gnt/N8MDDtmTK+1KvRwui3+vTVSv2+rvfXSYwIzF197acLPO1mtqvLAFUaGI5wMDDYMDnMYwICQDgYcAAB95LMWdQAAAA=="
+    },
+    "DZejFHa478M8qL7YRrLoo6EuyPGcrBXjkrXSY9uiUjQb": {
+     "owner": "DRayAUgENGQBKVaX8owNhgzkEDyoHTGVEGHVJT1E9pfH",
+     "data": "H4sIAAAAAAAAA+3NoQ4BAQDGcbcJEq9gI9kEm814g9MEhWkegQfQTJC068qVa4ogKGYySfEIFOVOEGxeQPD7tf9Xvl3UPzWes9pkWgk35+q2Vboe2vfx7REs9824t1p0k/DSGRXLgzTLAX9jPkyz47oQ1fOf7bsBAAAAAAAAAIC34AefL5AC/wQAKAAA"
+    },
+    "9G8S7sDkDeE8uYsoq7Wmbu4KqXByEe1FWjpWhJ1Wtpkx": {
+     "owner": "DRayAUgENGQBKVaX8owNhgzkEDyoHTGVEGHVJT1E9pfH",
+     "data": "H4sIAAAAAAAAAzswO/Ss4c9GrZJSZc/t11X2mPPfO2n5OeXxF8a+IyarA6d0eW3wvGEVy2eQ8e8/wygYBaNgFIyCUTAKRsEoGAV0BB+y//1nuPB2gh6yIDofDexJF+v8pkp7t42CUTBUgEzuv/8MBkL5F/8jAKF8NOnCzJhIdTo6chSMglEwCkbBKBgFo2AUjIJRMApGwSgYBaNgFIyCUTAKRsEoGAWjYBgApgGwEwBYBXJwACgAAA=="
+    },
+    "HWHiQsAdZp9ojjze4f6WgffHD2qMW6F4uFLHKShYznGU": {
+     "owner": "DRayAUgENGQBKVaX8owNhgzkEDyoHTGVEGHVJT1E9pfH",
+     "data": "H4sIAAAAAAAAA+3NoQ5BAQAFUC8JNj5BIGk2m+ELnkQQNZukPUmySYKkqZoi2BRBUASZpPgEioJp9oJqtnO2G+52t7udtQ7F+7AQ9XPh+pjflDPnfeXaudyCya60aE7H9WV4qrbTjdHj+U4iqs1TiQ/xHpPsZger3pcBAAAAAAAAAAAA/LngB58vQ3089gAoAAA="
+    },
+    "8QaQveJXCuEv3mfSdD9QmfrbxXg5curARxijBDYqJSHK": {
+     "owner": "DRayAUgENGQBKVaX8owNhgzkEDyoHTGVEGHVJT1E9pfH",
+     "data": "H4sIAAAAAAAAA+3OoQ6CYBiF4Y/sBheByVnc2Jx6BdAIJsdG4BLgAqzOGZyNYrBRbBSDgUIwY6IQaBQpFn43i834p/fp7865p+vH7L2dxInt5tX4NrfqcvGKmt44FE7mn3be1X0uAzM8DkoAAAAAAAAAAAAAAAAAANDIOQ9K9sWmVz8Sry6jP02X2O200XhSRAy9c18fRUjwewAoAAA="
+    },
+    "7cjWoVhhjh6A1spMPDj2faQi3r3cCWqpsrrD3uD913Uu": {
+     "owner": "DRayAUgENGQBKVaX8owNhgzkEDyoHTGVEGHVJT1E9pfH",
+     "data": "H4sIAAAAAAAAA+3arQ5BAQAFYLcIAg9xJe1uNuMNrmATRM0j0KmCpHkEZppiI5hNkEmKR6DY/E2zG1Szfd92wtnOI5zVqLGLrr1CuxPG831+Ucodt+Vz63QJBuviuD7sV2fxodLMdqeP5zupSXhLpz4ke8J9k6kto+DLAgAAAAAAAAAAAP7bL15yL0Sv1yUAKAAA"
+    },
+    "FYEBsmZXTabwNpbuhA8F3tXnHFFUXuHZYcAHYW94bzRZ": {
+     "owner": "DRayAUgENGQBKVaX8owNhgzkEDyoHTGVEGHVJT1E9pfH",
+     "data": "H4sIAAAAAAAAA+3OoQ6CYABFYXEEEjYfAEk2NzambwBJA5FmsTJ9AKK6mWwWuwYaxUBgYwQyWNycmy8AhcJvtViVufP1s3ujg5ONan+4XA2sMNcvZu+Wjsv5o5J2sXGa7Td2YBUTVw2KRnSAFjteGzHVzqV480xkbaF8bvqevL5vu9+8CQAAAAAAAAAAAAAAAOAPST/YfAGTYrY+ACgAAA=="
+    },
+    "EUwxyfi74etW3JUa25rF2iwHFaxsFx2dcXKEkJpFJR2C": {
+     "owner": "DRayAUgENGQBKVaX8owNhgzkEDyoHTGVEGHVJT1E9pfH",
+     "data": "H4sIAAAAAAAAA+3OIQrCAABA0Q1kUQ9gVBBswkD0BrMZjDaP4A5gXTDZPIJlzbKgsCJidskinkCLGLR5hZX3LvD/YTu7DN6r/jLtJPtrtxi2bqfRc3F/hesy3k032SRPqvG8mR+jAACgLkUZBY+sl54/3792WmVxo+4zAAAAAAAAAAiCsIbmD6bICCsAKAAA"
+    }
+   }
+  }
+ },
+ "cases": [
+  {
+   "snapshot": "fresh",
+   "name": "t0 buy 1000000",
+   "side": "buy",
+   "amountIn": "1000000",
+   "clock": "1793635507",
+   "expected": {
+    "ok": true,
+    "quoteAmount": "1000000",
+    "tokenAmount": "462044540",
+    "fee": "990000",
+    "sqrtPriceX64": "85710564356598405",
+    "tick": -107439
+   }
+  },
+  {
+   "snapshot": "fresh",
+   "name": "t0 buy 1000000000",
+   "side": "buy",
+   "amountIn": "1000000000",
+   "clock": "1793635507",
+   "expected": {
+    "ok": true,
+    "quoteAmount": "1000000000",
+    "tokenAmount": "461828934129",
+    "fee": "990000000",
+    "sqrtPriceX64": "85750578597780701",
+    "tick": -107430
+   }
+  },
+  {
+   "snapshot": "fresh",
+   "name": "t0 buy 20000000000",
+   "side": "buy",
+   "amountIn": "20000000000",
+   "clock": "1793635507",
+   "expected": {
+    "ok": true,
+    "quoteAmount": "20000000000",
+    "tokenAmount": "9155325676602",
+    "fee": "19800000000",
+    "sqrtPriceX64": "86511610211858388",
+    "tick": -107253
+   }
+  },
+  {
+   "snapshot": "fresh",
+   "name": "t0 sell 1000000000000",
+   "side": "sell",
+   "amountIn": "1000000000000",
+   "clock": "1793635507",
+   "expected": {
+    "ok": true,
+    "quoteAmount": "215131",
+    "tokenAmount": "1000000000000",
+    "fee": "21297955",
+    "sqrtPriceX64": "85623922681555783",
+    "tick": -107459
+   }
+  },
+  {
+   "snapshot": "fresh",
+   "name": "decay buy 1000000000",
+   "side": "buy",
+   "amountIn": "1000000000",
+   "clock": "1793635515",
+   "expected": {
+    "ok": true,
+    "quoteAmount": "1000000000",
+    "tokenAmount": "12378336630964",
+    "fee": "728700000",
+    "sqrtPriceX64": "86797197338614910",
+    "tick": -107187
+   }
+  },
+  {
+   "snapshot": "fresh",
+   "name": "decay buy 20000000000",
+   "side": "buy",
+   "amountIn": "20000000000",
+   "clock": "1793635515",
+   "expected": {
+    "ok": true,
+    "quoteAmount": "20000000000",
+    "tokenAmount": "199993499309657",
+    "fee": "14574000000",
+    "sqrtPriceX64": "107443985028542571",
+    "tick": -102919
+   }
+  },
+  {
+   "snapshot": "fresh",
+   "name": "decay sell 1000000000000",
+   "side": "sell",
+   "amountIn": "1000000000000",
+   "clock": "1793635515",
+   "expected": {
+    "ok": true,
+    "quoteAmount": "5836501",
+    "tokenAmount": "1000000000000",
+    "fee": "15676585",
+    "sqrtPriceX64": "85623922681555783",
+    "tick": -107459
+   }
+  },
+  {
+   "snapshot": "fresh",
+   "name": "decay buy 1000000000",
+   "side": "buy",
+   "amountIn": "1000000000",
+   "clock": "1793635524",
+   "expected": {
+    "ok": true,
+    "quoteAmount": "1000000000",
+    "tokenAmount": "25447136906780",
+    "fee": "434700000",
+    "sqrtPriceX64": "87974793625661437",
+    "tick": -106918
+   }
+  },
+  {
+   "snapshot": "fresh",
+   "name": "decay buy 20000000000",
+   "side": "buy",
+   "amountIn": "20000000000",
+   "clock": "1793635524",
+   "expected": {
+    "ok": true,
+    "quoteAmount": "20000000000",
+    "tokenAmount": "341797939277301",
+    "fee": "8694000000",
+    "sqrtPriceX64": "130995910769473110",
+    "tick": -98955
+   }
+  },
+  {
+   "snapshot": "fresh",
+   "name": "decay sell 1000000000000",
+   "side": "sell",
+   "amountIn": "1000000000000",
+   "clock": "1793635524",
+   "expected": {
+    "ok": true,
+    "quoteAmount": "12161348",
+    "tokenAmount": "1000000000000",
+    "fee": "9351738",
+    "sqrtPriceX64": "85623922681555783",
+    "tick": -107459
+   }
+  },
+  {
+   "snapshot": "fresh",
+   "name": "decay buy 1000000000",
+   "side": "buy",
+   "amountIn": "1000000000",
+   "clock": "1793635533",
+   "expected": {
+    "ok": true,
+    "quoteAmount": "1000000000",
+    "tokenAmount": "38170690786038",
+    "fee": "140700000",
+    "sqrtPriceX64": "89152389912707964",
+    "tick": -106652
+   }
+  },
+  {
+   "snapshot": "fresh",
+   "name": "decay buy 20000000000",
+   "side": "buy",
+   "amountIn": "20000000000",
+   "clock": "1793635533",
+   "expected": {
+    "ok": true,
+    "quoteAmount": "20000000000",
+    "tokenAmount": "440382522982157",
+    "fee": "2814000000",
+    "sqrtPriceX64": "154547836510403649",
+    "tick": -95648
+   }
+  },
+  {
+   "snapshot": "fresh",
+   "name": "decay sell 1000000000000",
+   "side": "sell",
+   "amountIn": "1000000000000",
+   "clock": "1793635533",
+   "expected": {
+    "ok": true,
+    "quoteAmount": "18486195",
+    "tokenAmount": "1000000000000",
+    "fee": "3026891",
+    "sqrtPriceX64": "85623922681555783",
+    "tick": -107459
+   }
+  },
+  {
+   "snapshot": "fresh",
+   "name": "settled buy 1",
+   "side": "buy",
+   "amountIn": "1",
+   "clock": "0",
+   "expected": {
+    "ok": false,
+    "programError": "Program log: AnchorError thrown in programs/amm/src/instructions/swap_v2.rs:171. Error Code: TooSmallInputOrOutputAmount. Error Number: 6022. Error Message: Swap input or output amount is too small."
+   }
+  },
+  {
+   "snapshot": "fresh",
+   "name": "settled buy 999",
+   "side": "buy",
+   "amountIn": "999",
+   "clock": "1793635545",
+   "expected": {
+    "ok": true,
+    "quoteAmount": "999",
+    "tokenAmount": "45718110",
+    "fee": "9",
+    "sqrtPriceX64": "85710528265570059",
+    "tick": -107439
+   }
+  },
+  {
+   "snapshot": "fresh",
+   "name": "settled buy 5000",
+   "side": "buy",
+   "amountIn": "5000",
+   "clock": "1793635545",
+   "expected": {
+    "ok": true,
+    "quoteAmount": "5000",
+    "tokenAmount": "228683151",
+    "fee": "50",
+    "sqrtPriceX64": "85710544126669521",
+    "tick": -107439
+   }
+  },
+  {
+   "snapshot": "fresh",
+   "name": "settled buy 1000000",
+   "side": "buy",
+   "amountIn": "1000000",
+   "clock": "1793635545",
+   "expected": {
+    "ok": true,
+    "quoteAmount": "1000000",
+    "tokenAmount": "45740314711",
+    "fee": "10000",
+    "sqrtPriceX64": "85714489677555227",
+    "tick": -107438
+   }
+  },
+  {
+   "snapshot": "fresh",
+   "name": "settled buy 77777777",
+   "side": "buy",
+   "amountIn": "77777777",
+   "clock": "1793635545",
+   "expected": {
+    "ok": true,
+    "quoteAmount": "77777777",
+    "tokenAmount": "3544988447847",
+    "fee": "777777",
+    "sqrtPriceX64": "86018942377481780",
+    "tick": -107367
+   }
+  },
+  {
+   "snapshot": "fresh",
+   "name": "settled buy 1000000000",
+   "side": "buy",
+   "amountIn": "1000000000",
+   "clock": "1793635545",
+   "expected": {
+    "ok": true,
+    "quoteAmount": "1000000000",
+    "tokenAmount": "43719748033104",
+    "fee": "10000000",
+    "sqrtPriceX64": "89675899554602457",
+    "tick": -106535
+   }
+  },
+  {
+   "snapshot": "fresh",
+   "name": "settled buy 5000000000",
+   "side": "buy",
+   "amountIn": "5000000000",
+   "clock": "1793635546",
+   "expected": {
+    "ok": true,
+    "quoteAmount": "5000000000",
+    "tokenAmount": "185744945025395",
+    "fee": "50000000",
+    "sqrtPriceX64": "105537400563800575",
+    "tick": -103277
+   }
+  },
+  {
+   "snapshot": "fresh",
+   "name": "settled buy 20000000000",
+   "side": "buy",
+   "amountIn": "20000000000",
+   "clock": "1793635546",
+   "expected": {
+    "ok": true,
+    "quoteAmount": "20000000000",
+    "tokenAmount": "475173258177051",
+    "fee": "200000000",
+    "sqrtPriceX64": "165018029348293518",
+    "tick": -94337
+   }
+  },
+  {
+   "snapshot": "fresh",
+   "name": "settled sell 1",
+   "side": "sell",
+   "amountIn": "1",
+   "clock": "0",
+   "expected": {
+    "ok": false,
+    "programError": "Program log: AnchorError thrown in programs/amm/src/instructions/swap_v2.rs:171. Error Code: TooSmallInputOrOutputAmount. Error Number: 6022. Error Message: Swap input or output amount is too small."
+   }
+  },
+  {
+   "snapshot": "fresh",
+   "name": "settled sell 1000",
+   "side": "sell",
+   "amountIn": "1000",
+   "clock": "0",
+   "expected": {
+    "ok": false,
+    "programError": "Program log: AnchorError thrown in programs/amm/src/instructions/swap_v2.rs:171. Error Code: TooSmallInputOrOutputAmount. Error Number: 6022. Error Message: Swap input or output amount is too small."
+   }
+  },
+  {
+   "snapshot": "fresh",
+   "name": "settled sell 123456789",
+   "side": "sell",
+   "amountIn": "123456789",
+   "clock": "1793635546",
+   "expected": {
+    "ok": true,
+    "quoteAmount": "2632",
+    "tokenAmount": "123456789",
+    "fee": "26",
+    "sqrtPriceX64": "85710513599932605",
+    "tick": -107439
+   }
+  },
+  {
+   "snapshot": "fresh",
+   "name": "settled sell 1000000000",
+   "side": "sell",
+   "amountIn": "1000000000",
+   "clock": "1793635546",
+   "expected": {
+    "ok": true,
+    "quoteAmount": "21319",
+    "tokenAmount": "1000000000",
+    "fee": "215",
+    "sqrtPriceX64": "85710437613179378",
+    "tick": -107439
+   }
+  },
+  {
+   "snapshot": "fresh",
+   "name": "settled sell 1000000000000",
+   "side": "sell",
+   "amountIn": "1000000000000",
+   "clock": "1793635546",
+   "expected": {
+    "ok": true,
+    "quoteAmount": "21297956",
+    "tokenAmount": "1000000000000",
+    "fee": "215130",
+    "sqrtPriceX64": "85623922681555783",
+    "tick": -107459
+   }
+  },
+  {
+   "snapshot": "fresh",
+   "name": "settled sell 5000000000000",
+   "side": "sell",
+   "amountIn": "5000000000000",
+   "clock": "1793635546",
+   "expected": {
+    "ok": true,
+    "quoteAmount": "106061124",
+    "tokenAmount": "5000000000000",
+    "fee": "1071324",
+    "sqrtPriceX64": "85279259193732748",
+    "tick": -107540
+   }
+  },
+  {
+   "snapshot": "fresh",
+   "name": "cross buy 90000000000",
+   "side": "buy",
+   "amountIn": "90000000000",
+   "clock": "1793635546",
+   "expected": {
+    "ok": true,
+    "quoteAmount": "90000000000",
+    "tokenAmount": "797243615132225",
+    "fee": "900000000",
+    "sqrtPriceX64": "442488447455480065",
+    "tick": -74609
+   }
+  },
+  {
+   "snapshot": "fresh",
+   "name": "cross buy 100000000000",
+   "side": "buy",
+   "amountIn": "100000000000",
+   "clock": "1793635546",
+   "expected": {
+    "ok": true,
+    "quoteAmount": "100000000000",
+    "tokenAmount": "813003051376087",
+    "fee": "1000000000",
+    "sqrtPriceX64": "481886688670922666",
+    "tick": -72903
+   }
+  },
+  {
+   "snapshot": "fresh",
+   "name": "cross buy 300000000000",
+   "side": "buy",
+   "amountIn": "300000000000",
+   "clock": "1793635546",
+   "expected": {
+    "ok": true,
+    "quoteAmount": "300000000000",
+    "tokenAmount": "922832718940234",
+    "fee": "3000000000",
+    "sqrtPriceX64": "1269851512979774671",
+    "tick": -53523
+   }
+  },
+  {
+   "snapshot": "moved",
+   "name": "moved buy 1000000000",
+   "side": "buy",
+   "amountIn": "1000000000",
+   "clock": "1793635546",
+   "expected": {
+    "ok": true,
+    "quoteAmount": "1000000000",
+    "tokenAmount": "29077430240427",
+    "fee": "10000000",
+    "sqrtPriceX64": "109502775816100104",
+    "tick": -102539
+   }
+  },
+  {
+   "snapshot": "moved",
+   "name": "moved buy 30000000000",
+   "side": "buy",
+   "amountIn": "30000000000",
+   "clock": "1793635546",
+   "expected": {
+    "ok": true,
+    "quoteAmount": "30000000000",
+    "tokenAmount": "425489312685669",
+    "fee": "300000000",
+    "sqrtPriceX64": "224498658132786460",
+    "tick": -88180
+   }
+  },
+  {
+   "snapshot": "moved",
+   "name": "moved buy 100000000000",
+   "side": "buy",
+   "amountIn": "100000000000",
+   "clock": "1793635546",
+   "expected": {
+    "ok": true,
+    "quoteAmount": "100000000000",
+    "tokenAmount": "634209427886630",
+    "fee": "1000000000",
+    "sqrtPriceX64": "501585809278643966",
+    "tick": -72101
+   }
+  },
+  {
+   "snapshot": "moved",
+   "name": "moved sell 1000000000000",
+   "side": "sell",
+   "amountIn": "1000000000000",
+   "clock": "1793635546",
+   "expected": {
+    "ok": true,
+    "quoteAmount": "32283521",
+    "tokenAmount": "1000000000000",
+    "fee": "326096",
+    "sqrtPriceX64": "105406129499192972",
+    "tick": -103302
+   }
+  },
+  {
+   "snapshot": "moved",
+   "name": "moved sell 97872472512697",
+   "side": "sell",
+   "amountIn": "97872472512697",
+   "clock": "1793635546",
+   "expected": {
+    "ok": true,
+    "quoteAmount": "2819890202",
+    "tokenAmount": "97872472512697",
+    "fee": "28483739",
+    "sqrtPriceX64": "94071179976737175",
+    "tick": -105578
+   }
+  },
+  {
+   "snapshot": "moved",
+   "name": "moved sell 195744945025394",
+   "side": "sell",
+   "amountIn": "195744945025394",
+   "clock": "1793635546",
+   "expected": {
+    "ok": true,
+    "quoteAmount": "5087088397",
+    "tokenAmount": "195744945025394",
+    "fee": "51384731",
+    "sqrtPriceX64": "84852312305045074",
+    "tick": -107640
+   }
+  },
+  {
+   "snapshot": "outside-lp",
+   "name": "lp buy 1000000000",
+   "side": "buy",
+   "amountIn": "1000000000",
+   "clock": "1793635548",
+   "expected": {
+    "ok": true,
+    "quoteAmount": "1000000000",
+    "tokenAmount": "29092784013306",
+    "fee": "10000000",
+    "sqrtPriceX64": "109471261021859656",
+    "tick": -102545
+   }
+  },
+  {
+   "snapshot": "outside-lp",
+   "name": "lp buy 10000000000",
+   "side": "buy",
+   "amountIn": "10000000000",
+   "clock": "1793635548",
+   "expected": {
+    "ok": true,
+    "quoteAmount": "10000000000",
+    "tokenAmount": "219414024877951",
+    "fee": "100000000",
+    "sqrtPriceX64": "145136449895454883",
+    "tick": -96905
+   }
+  },
+  {
+   "snapshot": "outside-lp",
+   "name": "lp buy 30000000000",
+   "side": "buy",
+   "amountIn": "30000000000",
+   "clock": "1793635548",
+   "expected": {
+    "ok": true,
+    "quoteAmount": "30000000000",
+    "tokenAmount": "426484318619537",
+    "fee": "300000000",
+    "sqrtPriceX64": "223799401896112615",
+    "tick": -88243
+   }
+  },
+  {
+   "snapshot": "outside-lp",
+   "name": "lp buy 60000000000",
+   "side": "buy",
+   "amountIn": "60000000000",
+   "clock": "1793635548",
+   "expected": {
+    "ok": true,
+    "quoteAmount": "60000000000",
+    "tokenAmount": "558084681619781",
+    "fee": "600000000",
+    "sqrtPriceX64": "342128935122889776",
+    "tick": -79754
+   }
+  },
+  {
+   "snapshot": "outside-lp",
+   "name": "lp buy 100000000000",
+   "side": "buy",
+   "amountIn": "100000000000",
+   "clock": "1793635548",
+   "expected": {
+    "ok": true,
+    "quoteAmount": "100000000000",
+    "tokenAmount": "636704928260116",
+    "fee": "1000000000",
+    "sqrtPriceX64": "499718140877202260",
+    "tick": -72176
+   }
+  },
+  {
+   "snapshot": "outside-lp",
+   "name": "lp buy 200000000000",
+   "side": "buy",
+   "amountIn": "200000000000",
+   "clock": "1793635549",
+   "expected": {
+    "ok": true,
+    "quoteAmount": "200000000000",
+    "tokenAmount": "711948673042611",
+    "fee": "2000000000",
+    "sqrtPriceX64": "893700553031628263",
+    "tick": -60549
+   }
+  },
+  {
+   "snapshot": "outside-lp",
+   "name": "lp sell 1000000000000",
+   "side": "sell",
+   "amountIn": "1000000000000",
+   "clock": "1793635549",
+   "expected": {
+    "ok": true,
+    "quoteAmount": "32285197",
+    "tokenAmount": "1000000000000",
+    "fee": "326113",
+    "sqrtPriceX64": "105411599534552059",
+    "tick": -103301
+   }
+  },
+  {
+   "snapshot": "outside-lp",
+   "name": "lp sell 63248315008464",
+   "side": "sell",
+   "amountIn": "63248315008464",
+   "clock": "1793635549",
+   "expected": {
+    "ok": true,
+    "quoteAmount": "1896369140",
+    "tokenAmount": "63248315008464",
+    "fee": "19155243",
+    "sqrtPriceX64": "97863752242759805",
+    "tick": -104787
+   }
+  },
+  {
+   "snapshot": "outside-lp",
+   "name": "lp sell 189744945025394",
+   "side": "sell",
+   "amountIn": "189744945025394",
+   "clock": "1793635549",
+   "expected": {
+    "ok": true,
+    "quoteAmount": "4964087847",
+    "tokenAmount": "189744945025394",
+    "fee": "50142301",
+    "sqrtPriceX64": "85389812876981613",
+    "tick": -107514
+   }
+  },
+  {
+   "snapshot": "breakout",
+   "name": "post buy 1",
+   "side": "buy",
+   "amountIn": "1",
+   "clock": "0",
+   "expected": {
+    "ok": false,
+    "programError": "Program log: AnchorError thrown in programs/amm/src/instructions/swap_v2.rs:171. Error Code: TooSmallInputOrOutputAmount. Error Number: 6022. Error Message: Swap input or output amount is too small."
+   }
+  },
+  {
+   "snapshot": "breakout",
+   "name": "post buy 1000000",
+   "side": "buy",
+   "amountIn": "1000000",
+   "clock": "1793635549",
+   "expected": {
+    "ok": true,
+    "quoteAmount": "1000000",
+    "tokenAmount": "626422591",
+    "fee": "0",
+    "sqrtPriceX64": "736111567790182654",
+    "tick": -64429
+   }
+  },
+  {
+   "snapshot": "breakout",
+   "name": "post buy 1000000000",
+   "side": "buy",
+   "amountIn": "1000000000",
+   "clock": "1793635549",
+   "expected": {
+    "ok": true,
+    "quoteAmount": "1000000000",
+    "tokenAmount": "623057540850",
+    "fee": "0",
+    "sqrtPriceX64": "740087208494650043",
+    "tick": -64321
+   }
+  },
+  {
+   "snapshot": "breakout",
+   "name": "post buy 50000000000",
+   "side": "buy",
+   "amountIn": "50000000000",
+   "clock": "1793635549",
+   "expected": {
+    "ok": true,
+    "quoteAmount": "50000000000",
+    "tokenAmount": "24656322083538",
+    "fee": "0",
+    "sqrtPriceX64": "935088604409466954",
+    "tick": -59644
+   }
+  },
+  {
+   "snapshot": "breakout",
+   "name": "post sell 1000",
+   "side": "sell",
+   "amountIn": "1000",
+   "clock": "0",
+   "expected": {
+    "ok": false,
+    "programError": "Program log: AnchorError thrown in programs/amm/src/instructions/swap_v2.rs:171. Error Code: TooSmallInputOrOutputAmount. Error Number: 6022. Error Message: Swap input or output amount is too small."
+   }
+  },
+  {
+   "snapshot": "breakout",
+   "name": "post sell 1000000000000",
+   "side": "sell",
+   "amountIn": "1000000000000",
+   "clock": "1793635549",
+   "expected": {
+    "ok": true,
+    "quoteAmount": "1574794893",
+    "tokenAmount": "1000000000000",
+    "fee": "0",
+    "sqrtPriceX64": "729809049072178360",
+    "tick": -64601
+   }
+  },
+  {
+   "snapshot": "breakout",
+   "name": "post sell 440630730607523",
+   "side": "sell",
+   "amountIn": "440630730607523",
+   "clock": "1793635550",
+   "expected": {
+    "ok": true,
+    "quoteAmount": "145705638466",
+    "tokenAmount": "440630730607523",
+    "fee": "0",
+    "sqrtPriceX64": "153311048512734609",
+    "tick": -95809
+   }
+  },
+  {
+   "snapshot": "breakout",
+   "name": "post sell 881261461215047",
+   "side": "sell",
+   "amountIn": "881261461215047",
+   "clock": "1793635550",
+   "expected": {
+    "ok": true,
+    "quoteAmount": "162623220136",
+    "tokenAmount": "881261461215047",
+    "fee": "0",
+    "sqrtPriceX64": "85389812876982043",
+    "tick": -107514
+   }
+  }
+ ]
+}

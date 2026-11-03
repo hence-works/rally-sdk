@@ -31,6 +31,71 @@ describe("grindMint (I-7)", () => {
   });
 });
 
+describe("grindMint suffix", () => {
+  /** A deterministic seed stream, so the search is reproducible. */
+  const stream = () => {
+    let n = 0;
+    return () => {
+      n++;
+      const s = new Uint8Array(32);
+      new DataView(s.buffer).setUint32(0, n, true);
+      return s;
+    };
+  };
+
+  // A high quote makes nearly every key sort below it, so these tests pay for the suffix alone.
+  const HIGH = addr(0xff);
+
+  it("returns a key ending in the suffix that still sorts below the quote (I-7), against wSOL", async () => {
+    const g = await grindMint(WSOL_MINT, { suffix: "z", randomSeed: stream() });
+    expect(g.address.endsWith("z")).toBe(true);
+    expect(sortsBelow(g.address, WSOL_MINT)).toBe(true);
+    expect((await createKeyPairSignerFromPrivateKeyBytes(g.seed)).address).toBe(g.address);
+  }, 60_000);
+
+  it("a two character suffix is found, deterministically", async () => {
+    const a = await grindMint(HIGH, { suffix: "Rx", randomSeed: stream() });
+    const b = await grindMint(HIGH, { suffix: "Rx", randomSeed: stream() });
+    expect(a.address.endsWith("Rx")).toBe(true);
+    expect(a.address).toBe(b.address);
+    expect(a.attempts).toBe(b.attempts);
+    // Two base58 characters against the I-7 bound is ~58^2 x 43 keypairs: seconds locally,
+    // past vitest's 5 s default on a shared CI runner.
+  }, 60_000);
+
+  it("is case-sensitive: base58 distinguishes a from A", async () => {
+    const lower = await grindMint(HIGH, { suffix: "a", randomSeed: stream() });
+    const upper = await grindMint(HIGH, { suffix: "A", randomSeed: stream() });
+    expect(lower.address.endsWith("a")).toBe(true);
+    expect(upper.address.endsWith("A")).toBe(true);
+    expect(lower.address).not.toBe(upper.address);
+  });
+
+  it("composes with ordering: an unorderable quote exhausts instead of returning a bad mint", async () => {
+    await expect(grindMint(addr(0), { suffix: "a", maxAttempts: 300, randomSeed: stream() })).rejects.toMatchObject({ code: "MINING_FAILED" });
+  });
+
+  it("rejects what cannot be a base58 suffix, and anything over 3 characters", async () => {
+    for (const suffix of ["", "abcd", "0", "O", "I", "l", "a!", "a b"]) {
+      await expect(grindMint(WSOL_MINT, { suffix })).rejects.toMatchObject({ code: "MINING_FAILED" });
+    }
+    await expect(grindMint(WSOL_MINT, { suffix: 5 as never })).rejects.toMatchObject({ code: "MINING_FAILED" });
+  });
+
+  it("gives up with MINING_FAILED, and can be cancelled", async () => {
+    await expect(grindMint(WSOL_MINT, { suffix: "zzz", maxAttempts: 50, randomSeed: stream() })).rejects.toMatchObject({ code: "MINING_FAILED" });
+    const ac = new AbortController();
+    ac.abort();
+    await expect(grindMint(WSOL_MINT, { suffix: "zz", signal: ac.signal })).rejects.toMatchObject({ code: "MINING_FAILED" });
+  });
+
+  it("reports progress", async () => {
+    const seen: number[] = [];
+    await expect(grindMint(HIGH, { suffix: "zzz", maxAttempts: 2500, randomSeed: stream(), onProgress: (n) => seen.push(n) })).rejects.toBeInstanceOf(RallyError);
+    expect(seen).toEqual([1000, 2000]);
+  });
+});
+
 describe("sortsBelow", () => {
   it("compares raw key bytes, big-endian, strictly", () => {
     expect(sortsBelow(addr(1), addr(2))).toBe(true);

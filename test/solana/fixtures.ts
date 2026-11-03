@@ -117,6 +117,8 @@ export function launchFixture(over: Partial<LaunchAccount> = {}): LaunchAccount 
     dividendEpoch: 0n,
     dividendReserved: 0n,
     supportNonce: 0,
+    feeNftMint: addr(60),
+    feeNftBump: 0,
     ...over,
   };
 }
@@ -124,7 +126,16 @@ export function launchFixture(over: Partial<LaunchAccount> = {}): LaunchAccount 
 /** A fake kit RPC serving fixed account bytes by address. */
 export function fakeRpc(accounts: Record<string, { data: Uint8Array; owner: Address }>) {
   const b64 = getBase64Decoder();
+  const one = (a: Address) => {
+    const acc = accounts[a];
+    return acc
+      ? { data: [b64.decode(acc.data), "base64"], owner: acc.owner, lamports: 1n, executable: false, space: BigInt(acc.data.length) }
+      : null;
+  };
   return {
+    getMultipleAccounts: (addrs: Address[]) => ({
+      send: async () => ({ context: { slot: 1n }, value: addrs.map(one) }),
+    }),
     getAccountInfo: (a: Address) => ({
       send: async () => {
         const acc = accounts[a];

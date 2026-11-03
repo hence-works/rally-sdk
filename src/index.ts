@@ -47,6 +47,7 @@ export {
   poolManagerAbi,
   rallyHookAbi,
   rallyHookU4Abi,
+  rallyFeeBeneficiaryAbi,
   rallyLensU4Abi,
   rallyParamRegistryAbi,
   rallyRouterAbi,
@@ -54,6 +55,16 @@ export {
   rallyUniversalRouterAbi,
   uniswapV3PoolAbi,
 } from "./abis";
+
+// Creator-fee NFT (RallyFeeBeneficiary, protocol v2)
+export {
+  getFeeBeneficiary,
+  prepareRegisterFeeBeneficiary,
+  prepareTransferFeeRight,
+  registerFeeBeneficiary,
+  transferFeeRight,
+} from "./feebeneficiary";
+export type { FeeBeneficiaryRead, FeeBeneficiaryTarget } from "./feebeneficiary";
 
 // Pool identity
 export {

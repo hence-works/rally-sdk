@@ -132,6 +132,12 @@ const v2 = (m) => {
       ];
       if (g.CurveShapes !== undefined) parts.push(`curveShapes: ${field(g.CurveShapes)}`);
       if (g.Lens !== undefined) parts.push(`lens: ${field(g.Lens)}`);
+      // `RallyFeeBeneficiary`: the ERC-721 title to this generation's creator-fee stream.
+      // Per generation (each hook has its own); absent on a manifest that predates it.
+      if (g.FeeBeneficiary !== undefined) parts.push(`feeBeneficiary: ${field(g.FeeBeneficiary)}`);
+      if (g.FeeBeneficiaryBlock !== undefined) {
+        parts.push(`feeBeneficiaryBlock: ${field(g.FeeBeneficiaryBlock)}`);
+      }
       if (g.RallyVault !== undefined) parts.push(`rallyVault: ${field(g.RallyVault)}`);
       if (g.DividendDistributor !== undefined) {
         parts.push(`dividendDistributor: ${field(g.DividendDistributor)}`);

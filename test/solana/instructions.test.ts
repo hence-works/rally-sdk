@@ -52,28 +52,29 @@ describe("buy / sell", () => {
     const ix = last((await prepareBuy(params)).instructions);
     const accts = ix.accounts!;
     expect(accts[0]).toMatchObject({ address: TRADER, role: AccountRole.READONLY_SIGNER });
-    // 24 IDL accounts, then the remaining tick arrays.
-    const idlCount = 24;
+    // 23 Wave 0 IDL accounts, then the remaining tick arrays.
+    const idlCount = 23;
     expect(accts.slice(0, idlCount)).toHaveLength(idlCount);
-    expect(accts[5]).toMatchObject({ address: RALLY_SOLANA_PROTOCOL_PROGRAM_ID, role: AccountRole.READONLY }); // referral = None
-    expect(accts[12]!.address).toBe(RAYDIUM_CLMM_DEVNET);
-    expect(accts[18]!.address).toBe(TOKEN_PROGRAM_ADDRESS);
-    expect(accts[19]!.address).toBe(TOKEN_2022_PROGRAM_ADDRESS);
-    expect(accts[22]!.address).toBe(await rallyPdas().eventAuthority());
-    expect(accts[23]!.address).toBe(RALLY_SOLANA_PROTOCOL_PROGRAM_ID);
+    expect(accts[3]).toMatchObject({ address: RALLY_SOLANA_PROTOCOL_PROGRAM_ID, role: AccountRole.READONLY });
+    expect(accts[4]).toMatchObject({ address: RALLY_SOLANA_PROTOCOL_PROGRAM_ID, role: AccountRole.READONLY });
+    expect(accts[11]!.address).toBe(RAYDIUM_CLMM_DEVNET);
+    expect(accts[17]!.address).toBe(TOKEN_PROGRAM_ADDRESS);
+    expect(accts[18]!.address).toBe(TOKEN_2022_PROGRAM_ADDRESS);
+    expect(accts[21]!.address).toBe(await rallyPdas().eventAuthority());
+    expect(accts[22]!.address).toBe(RALLY_SOLANA_PROTOCOL_PROGRAM_ID);
     expect(accts.filter((a) => a.role === AccountRole.READONLY_SIGNER || a.role === AccountRole.WRITABLE_SIGNER)).toHaveLength(1);
   });
 
   it("passes the referral PDA when a referrer is given", async () => {
     const ref = addr(30);
     const ix = last((await prepareBuy({ ...params, referrer: ref })).instructions);
-    expect(ix.accounts![5]).toMatchObject({ address: await rallyPdas().referral(QUOTE, ref), role: AccountRole.WRITABLE });
+    expect(ix.accounts![3]).toMatchObject({ address: await rallyPdas().referral(QUOTE, ref), role: AccountRole.WRITABLE });
   });
 
   it("appends the bitmap then only the tick arrays ahead of the price: ascending on a buy, descending on a sell", async () => {
     const pool = params.launch.pool;
     const r = raydiumPdas();
-    const buy = last((await prepareBuy(params)).instructions).accounts!.slice(24);
+    const buy = last((await prepareBuy(params)).instructions).accounts!.slice(23);
     // Positions: [-7200, 3600] and [-3600, 7200] -> array starts -7200, 3600, -3600, 7200; tick -1000 is in array -3600.
     expect(buy.map((a) => a.address)).toEqual([
       await r.bitmap(pool),
@@ -81,7 +82,7 @@ describe("buy / sell", () => {
       await r.tickArray(pool, 3600),
       await r.tickArray(pool, 7200),
     ]);
-    const sell = last((await prepareSell(params)).instructions).accounts!.slice(24);
+    const sell = last((await prepareSell(params)).instructions).accounts!.slice(23);
     expect(sell.map((a) => a.address)).toEqual([
       await r.bitmap(pool),
       await r.tickArray(pool, -3600),
@@ -248,22 +249,23 @@ describe("open_pool", () => {
 
 describe("claims, referrals, fee collection", () => {
   const launch = launchFixture();
-  it("claim_creator_fees: no args, creator signs", async () => {
-    const tx = await prepareClaimCreatorFees({ creator: addr(2), mint: MINT, launch, quoteTokenProgram: TOKEN_PROGRAM_ADDRESS });
+  it("claim_creator_fees: no args, permissionless payout to holder", async () => {
+    const feeNftMint = await rallyPdas().feeBeneficiary(await rallyPdas().launch(MINT));
+    const tx = await prepareClaimCreatorFees({ payer: addr(2), holder: addr(9), feeNftAccount: addr(61), mint: MINT, launch: { ...launch, feeNftMint }, quoteTokenProgram: TOKEN_PROGRAM_ADDRESS });
     const ix = last(tx.instructions);
     expect(dataOf(ix)).toEqual(ixDisc("claim_creator_fees"));
-    expect(ix.accounts![0]).toMatchObject({ address: addr(2), role: AccountRole.READONLY_SIGNER });
-    await expect(prepareClaimCreatorFees({ creator: addr(9), mint: MINT, launch, quoteTokenProgram: TOKEN_PROGRAM_ADDRESS })).rejects.toMatchObject({ code: "NO_ACCOUNT" });
+    expect(ix.accounts![7]).toMatchObject({ address: addr(9), role: AccountRole.READONLY });
+    expect(ix.accounts!.every(a => a.role < 2)).toBe(true);
   });
   it("register_referrer / claim_referral_fees", async () => {
     const referrer = addr(50);
-    const reg = last((await prepareRegisterReferrer({ referrer, quoteMint: QUOTE })).instructions);
+    const reg = last((await prepareRegisterReferrer({ referrer, quoteMint: QUOTE, quoteTokenProgram: TOKEN_PROGRAM_ADDRESS })).instructions);
     expect(dataOf(reg)).toEqual(ixDisc("register_referrer"));
     expect(reg.accounts![0]).toMatchObject({ address: referrer, role: AccountRole.WRITABLE_SIGNER });
-    expect(reg.accounts![2]!.address).toBe(await rallyPdas().referral(QUOTE, referrer));
+    expect(reg.accounts![3]!.address).toBe(await rallyPdas().referral(QUOTE, referrer));
     const claim = last((await prepareClaimReferralFees({ referrer, quoteMint: QUOTE, quoteTokenProgram: TOKEN_PROGRAM_ADDRESS })).instructions);
     expect(dataOf(claim)).toEqual(ixDisc("claim_referral_fees"));
-    expect(claim.accounts).toHaveLength(9);
+    expect(claim.accounts).toHaveLength(8);
   });
   it("collect_fees: index arg u8, no signer", async () => {
     const tx = await prepareCollectFees({ mint: MINT, index: 1, launch, quoteTokenProgram: TOKEN_PROGRAM_ADDRESS });

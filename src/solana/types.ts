@@ -96,6 +96,8 @@ export interface LaunchAccount {
   dividendEpoch: bigint;
   dividendReserved: bigint;
   supportNonce: number;
+  feeNftMint: Address;
+  feeNftBump: number;
 }
 
 /** Decoded `QuoteConfig` account (PDA `["quote", mint]`). */
@@ -141,4 +143,6 @@ export interface ReferralAccountData {
   quoteMint: Address;
   owed: bigint;
   earned: bigint;
+  vault: Address;
+  vaultBump: number;
 }

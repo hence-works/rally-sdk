@@ -88,6 +88,35 @@ who cannot patch it.
 - `minOut` is required and rejected below 1; the swap deadline comes from the cluster's
   Clock sysvar, never `Date.now()`. Do not add defaults for either.
 - The mint must sort below the quote (I-7); `prepareCreateLaunch` re-checks it.
+- **Quote math (`clmm.ts`, `clmm-swap.ts`, `curve.ts`, `quote.ts`) is a bit-for-bit port**, not a
+  model. `clmm.ts` is Raydium's tick, liquidity and `compute_swap` math; `clmm-swap.ts` replays
+  `swap_internal` (exact-input, static fee) over decoded `PoolState` / `TickArrayState`; `curve.ts`
+  is the program's `curve.rs`. Integer math only; every rounding direction is the pool's. Rules:
+  - The swap quote reads the pool's REAL tick arrays through its bitmap, never just the launch's
+    planned positions (anyone can LP the pool), and `prepareBuy` / `prepareSell` send the quote's
+    arrays when given a `quote`. Without one, the old launch-positions derivation is wrong the
+    moment an outsider opens a position.
+  - It REFUSES (`QUOTE_UNAVAILABLE` / `INSUFFICIENT_LIQUIDITY`) rather than approximates: an unreadable
+    array, dynamic-fee state, a reached tick with limit orders, tick spacing < 15, too many arrays.
+  - Slippage is never defaulted: `minOut` comes from the caller, or from `quote` + the caller's own
+    `slippageBps`. A `quote.minOut` is never adopted implicitly by `prepare*`.
+  - Wave 0 supports exact-output through `quoteBuyExactOutSolana` / `quoteSellExactOutSolana`
+    and `prepareBuyExactOut` / `prepareSellExactOut`. `amountOut` is the net recipient amount;
+    `maxIn` includes all fees and uses ceiling slippage. Both bounds are explicit, never inferred
+    from a quote's optional `maxIn`. Partial exact-output fills are rejected.
+  - Creator claims pay the fee NFT holder (or original creator only after burn), never an arbitrary
+    caller. Resolve the holder from Token-2022 state. Off-curve holders must sign through CPI.
+    A payer only funds ATA creation. Referral balances live in per-referrer vaults; legacy reads
+    expose a zero vault until extension/migration. Never add shared quote vault writes to swaps.
+  - Anything that changes this math must keep `test/solana/golden.test.ts` byte-exact. The golden
+    fixture (`test/solana/golden/fixtures/local-validator.json`) is produced by `golden/harness.ts`
+    against the DEPLOYED program cloned into a local validator (`golden/validator.sh`); regenerate it
+    after the program or Raydium is upgraded. `golden/vectors/` holds Rust-generated vectors from the
+    program crate's own math.
+- `grindMint` takes an optional `suffix` (case-sensitive base58, at most 3 characters). It is a plain
+  keypair loop over WebCrypto (about 1k/s), so it is only practical to 2 characters against wSOL
+  (the I-7 ordering rule already costs ~43x there). Never add a prefix option: ordering pins the
+  high bytes.
 - Publishing this surface exposes the program id and IDL; the owner decides when.
 
 ## Commands
