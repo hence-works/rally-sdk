@@ -684,10 +684,13 @@ refresh the validator fixtures to check SDK exact-output quotes against actual f
 
 `grindMint(quote, { suffix })` pins the last 1 to 5 base58 characters (case-sensitive) of the mint
 address while keeping it below the quote (I-7). Each character costs about 58x, on top of the
-ordering rule (about 43x against wSOL): at roughly a thousand keypairs a second, one character takes
-seconds, two take minutes, three take hours, four take days, and five take about a year on average.
-The default limit is six times the expected attempts, so long suffixes need distributed or durable
-workers in practice. `signal` and `onProgress` support cancellation and progress reporting.
+ordering rule (about 39x against wSOL). Suffix searches use the embedded Rust/WASM ed25519 miner and
+independently reconstruct its returned keypair before use. If WebAssembly cannot instantiate, the
+same call falls back to WebCrypto. The default limit is six times the expected attempts, so long
+suffixes still need worker sharding or durable execution in practice. Workers sharing the same
+`masterSeed` can set distinct `startNonce` values and a common `stride`; for example, eight
+workers use starts 0 through 7 and stride 8. `chunkSize`, `signal`, and `onProgress` control progress
+and cancellation granularity.
 
 ## Creator-fee NFT (protocol v2)
 

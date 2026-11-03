@@ -113,10 +113,11 @@ who cannot patch it.
     against the DEPLOYED program cloned into a local validator (`golden/validator.sh`); regenerate it
     after the program or Raydium is upgraded. `golden/vectors/` holds Rust-generated vectors from the
     program crate's own math.
-- `grindMint` takes an optional `suffix` (case-sensitive base58, at most 5 characters). It is a plain
-  keypair loop over WebCrypto (about 1k/s), so it is only practical to 2 characters against wSOL
-  without distributed or durable workers (the I-7 ordering rule already costs ~43x there). Never
-  add a prefix option: ordering pins the high bytes.
+- `grindMint` takes an optional `suffix` (case-sensitive base58, at most 5 characters). Suffix
+  searches use the embedded Rust/WASM ed25519 miner, independently reconstruct and verify the
+  returned keypair, and fall back to the WebCrypto keypair loop when WASM cannot instantiate.
+  Worker shards share a master seed and use disjoint `startNonce` / `stride` sequences. Never add a
+  prefix option: ordering pins the high bytes.
 - Publishing this surface exposes the program id and IDL; the owner decides when.
 
 ## Commands

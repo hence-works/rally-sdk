@@ -46,6 +46,23 @@ describe("grindMint suffix", () => {
   // A high quote makes nearly every key sort below it, so these tests pay for the suffix alone.
   const HIGH = addr(0xff);
 
+  it("preserves randomSeed as one legacy WebCrypto seed per candidate", async () => {
+    const seed = new Uint8Array(32).fill(7);
+    const expected = await createKeyPairSignerFromPrivateKeyBytes(seed);
+    let calls = 0;
+    const result = await grindMint(HIGH, {
+      suffix: expected.address.slice(-1),
+      maxAttempts: 1,
+      randomSeed: () => {
+        calls++;
+        return seed;
+      },
+    });
+    expect(result.address).toBe(expected.address);
+    expect(result.nonce).toBeUndefined();
+    expect(calls).toBe(1);
+  });
+
   it("returns a key ending in the suffix that still sorts below the quote (I-7), against wSOL", async () => {
     const g = await grindMint(WSOL_MINT, { suffix: "z", randomSeed: stream() });
     expect(g.address.endsWith("z")).toBe(true);
