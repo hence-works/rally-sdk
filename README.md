@@ -559,6 +559,7 @@ import {
   SOLANA_DEVNET_CHAIN_ID, WSOL_MINT, grindMint, fetchLaunch, fetchQuoteConfig,
   prepareCreateLaunch, prepareOpenPool, prepareBuy, prepareSell,
   quoteBuySolana, quoteSellSolana, quoteFirstBuy,
+  quoteBuyExactOutSolana, prepareBuyExactOut,
 } from "@rally-fun/sdk/solana";
 import { createSolanaRpc } from "@solana/kit";
 
@@ -626,10 +627,60 @@ quote. `slippageBps` is yours to choose; with it the quote also returns `minOut`
   `maxFirstBuyQuote` is exactly what `open_pool` charges: that value is accepted, one unit less
   reverts. `quoteSwapFromState` is the pure core, for callers that already hold the accounts.
 
-**Exact-output trades are not possible.** The program's router is exact-input only (its swap
-instruction takes `amount_in` and `min_out`), so there is no "buy exactly N tokens" quote or
-`prepare*`: convert a target to an input amount yourself and re-quote. Exact-output needs a program
-upgrade.
+Wave 0 also supports exact-output trades. `quoteBuyExactOutSolana` buys an exact number of
+launch tokens; `quoteSellExactOutSolana` receives an exact net amount of quote. Both return
+the required `amountIn` including fees, `exactOutput: true`, and an optional `maxIn` when
+given `slippageBps`. Input slippage rounds up with `applySlippageExactOut`. The corresponding
+`prepareBuyExactOut` / `prepareSellExactOut` require an explicit `maxIn`, or a matching quote
+and explicit `slippageBps`. They do not silently adopt the quote's bound. Amounts and bounds
+must fit u64; exact-output fills are all-or-nothing. Deadlines use cluster time as above.
+
+```ts
+const exact = await quoteBuyExactOutSolana({ rpc, mint: mint.address, amountOut: 5_000_000n });
+const buyExact = await prepareBuyExactOut({ rpc, trader, mint: mint.address,
+  quote: exact, slippageBps: 100 });
+// Assemble and sign buyExact.instructions with the host wallet.
+```
+
+### Wave 0 fee rights and referrals
+
+Every new launch mints a Token-2022 fee-right NFT to its creator. For a legacy launch,
+`prepareRegisterFeeBeneficiary({ rpc, payer, mint })` registers it to the recorded creator.
+`fetchFeeBeneficiary(rpc, mint)` reads its current holder and token account, or returns the
+original creator with `burned: true` when the supply is zero. Reads validate the PDA mint,
+Token-2022 owners and NFT amount; retry if the NFT moved between RPC reads.
+
+`prepareClaimCreatorFees({ rpc, payer, mint })` resolves the payee and creates their quote
+ATA before the permissionless claim. Offline callers provide `launch`, `holder`,
+`feeNftAccount` (null for a burned NFT) and `quoteTokenProgram`. A supplied
+`holderQuoteAccount` must be that holder's canonical ATA and skips its creation, so no payer
+is required. `creator` and `creatorQuoteAccount` remain deprecated aliases for payer and
+destination; they never select the payee. Off-curve holders are marked as required signers:
+their controlling program must invoke the claim through CPI with its seeds. They cannot sign
+a top-level wallet transaction. Token-2022 transfer/burn operations remain host-wallet
+operations; after either operation, refresh the holder before preparing a claim.
+
+`prepareSetCreatorClaimEscrow({ governance, escrow })` builds the admin escrow toggle;
+`fetchConfig` exposes the current switch. The switch delays claims until breakout without
+changing fee ownership. All these builders return unsigned instructions.
+
+`prepareRegisterReferrer` now requires `quoteTokenProgram` or `rpc` and creates a separate
+vault for that referrer and quote. Trades include that vault only when a referrer is given;
+they no longer write shared quote state. `fetchReferral` / `decodeReferral` expose `vault`
+and `vaultBump`, including zero values on legacy 89-byte accounts. Legacy migration uses
+`prepareExtendAccount({ payer, account })` then `prepareMigrateReferral({ payer, referrer,
+quoteMint, quoteTokenProgram })`; re-read before retrying migration because an already
+migrated referral is rejected by the program. Claim builders pay from the individual vault.
+
+This SDK requires the Wave 0 program ABI. Deploy compatible consumers together with that
+program upgrade; the old SDK account lists are incompatible. Existing exact-input API names
+and amounts remain unchanged. A versioned SDK release is required before publishing these
+additions and the changed creator-claim/referral requirements.
+
+Release verification: existing recorded local-validator golden fixtures cover exact-input
+trades. Wave 0 exact-output replay has offline state, rounding, cross-tick and rejection tests;
+refresh the validator fixtures to check SDK exact-output quotes against actual fills, including
+`maxIn` equal to the quote and one unit below it, before treating that parity as verified.
 
 `grindMint(quote, { suffix })` pins the last 1 to 3 base58 characters (case-sensitive) of the mint
 address while keeping it below the quote (I-7). Each character costs about 58x, on top of the

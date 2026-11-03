@@ -117,6 +117,8 @@ export function launchFixture(over: Partial<LaunchAccount> = {}): LaunchAccount 
     dividendEpoch: 0n,
     dividendReserved: 0n,
     supportNonce: 0,
+    feeNftMint: addr(60),
+    feeNftBump: 0,
     ...over,
   };
 }

@@ -1,6 +1,6 @@
-import { AccountRole, type AccountMeta, type Address, type Instruction } from "@solana/kit";
+import { AccountRole, isOffCurveAddress, type AccountMeta, type Address, type Instruction } from "@solana/kit";
 import { RallyError } from "../errors";
-import { fetchClusterTime, fetchLaunch, fetchPoolSlot0, fetchQuoteConfig, type SolanaRpc } from "./accounts";
+import { fetchClusterTime, fetchFeeBeneficiary, fetchLaunch, fetchPoolSlot0, fetchQuoteConfig, type FeeBeneficiaryRpc, type SolanaRpc } from "./accounts";
 import { sortsBelow } from "./address";
 import { camel, encodeArgs } from "./codec";
 import {
@@ -15,7 +15,7 @@ import {
 import { SOLANA_DEPLOYMENTS } from "./deployments.generated";
 import { RALLY_SOLANA_PROTOCOL_IDL } from "./idl.generated";
 import { findAssociatedTokenAddress, rallyPdas, raydiumPdas, tickArrayStart } from "./pda";
-import { applySlippage, type SolanaSwapQuote } from "./quote";
+import { applySlippage, applySlippageExactOut, type SolanaSwapQuote } from "./quote";
 import type { AddressOrSigner, CurveSegment, FeeConfig, LaunchAccount } from "./types";
 
 // ── Shared shapes ────────────────────────────────────────────────────────────
@@ -345,6 +345,8 @@ export async function prepareCreateLaunch(p: PrepareCreateLaunchParams): Promise
       launchTokenVault: tokenVault,
       launchQuoteVault: quoteLaunchVault,
       preset: p.preset,
+      feeNftMint: await pdas.feeBeneficiary(launch),
+      creatorFeeNftAccount: await findAssociatedTokenAddress(creator, await pdas.feeBeneficiary(launch), TOKEN_2022_PROGRAM_ADDRESS),
       quoteTokenProgram: qp,
       eventAuthority,
       program: ctx.programId,
@@ -515,20 +517,21 @@ export interface PrepareSwapParams extends SolanaTarget, Reads {
   quoteTokenProgram?: Address;
 }
 
-async function prepareSwap(side: "buy" | "sell", p: PrepareSwapParams): Promise<PreparedSolanaTransaction> {
+async function prepareSwap(side: "buy" | "sell", p: PrepareSwapParams, exactOutput = false): Promise<PreparedSolanaTransaction> {
   const ctx = resolveTarget(p);
   if (p.quote) {
+    if (!!p.quote.exactOutput !== exactOutput) throw new RallyError("INVALID_AMOUNT", "Quote exact-input/output mode does not match the instruction");
     if (p.quote.side !== side || p.quote.mint !== p.mint) {
       throw new RallyError(
         "INVALID_AMOUNT",
         `The supplied quote is a ${p.quote.side} for ${p.quote.mint}, not a ${side} for ${p.mint}`,
       );
     }
-    if (p.amountIn !== undefined && p.amountIn !== p.quote.amountIn) {
+    if (p.amountIn !== undefined && p.amountIn !== (exactOutput ? p.quote.amountOut : p.quote.amountIn)) {
       throw new RallyError("INVALID_AMOUNT", "amountIn does not match the quote's amountIn: re-quote for the amount you are sending");
     }
   }
-  const amountIn = u64(p.amountIn ?? p.quote?.amountIn ?? (undefined as unknown as bigint), "amountIn");
+  const amountIn = u64(p.amountIn ?? (exactOutput ? p.quote?.amountOut : p.quote?.amountIn) ?? (undefined as unknown as bigint), exactOutput ? "amountOut" : "amountIn");
   let minOutRaw = p.minOut;
   if (p.slippageBps !== undefined) {
     if (p.minOut !== undefined) {
@@ -537,9 +540,9 @@ async function prepareSwap(side: "buy" | "sell", p: PrepareSwapParams): Promise<
     if (!p.quote) {
       throw new RallyError("INVALID_AMOUNT", "slippageBps derives minOut from a quote: pass `quote` too, or pass minOut");
     }
-    minOutRaw = applySlippage(p.quote.amountOut, p.slippageBps);
+    minOutRaw = exactOutput ? applySlippageExactOut(p.quote.amountIn, p.slippageBps) : applySlippage(p.quote.amountOut, p.slippageBps);
   }
-  const minOut = u64(minOutRaw as bigint, "minOut");
+  const minOut = u64(minOutRaw as bigint, exactOutput ? "maxIn" : "minOut");
   const launch = await launchFor(p.mint, p.launch, p.rpc, ctx);
   requirePoolOpen(launch);
   if (p.quote && p.quote.pool !== launch.pool) {
@@ -551,9 +554,11 @@ async function prepareSwap(side: "buy" | "sell", p: PrepareSwapParams): Promise<
   let deadline = p.deadline;
   if (deadline === undefined) {
     const now = await fetchClusterTime(need(p.rpc, "`deadline` (or `rpc`, to measure it from the cluster clock)"));
-    deadline = now + BigInt(p.deadlineSeconds ?? 120);
+    const seconds = p.deadlineSeconds ?? 120;
+    if (!Number.isSafeInteger(seconds) || seconds <= 0) throw new RallyError("INVALID_AMOUNT", "deadlineSeconds must be a positive safe integer");
+    deadline = now + BigInt(seconds);
   }
-  if (typeof deadline !== "bigint" || deadline <= 0n) {
+  if (typeof deadline !== "bigint" || deadline <= 0n || deadline >= 1n << 63n) {
     throw new RallyError("INVALID_AMOUNT", "deadline must be a positive unix-seconds bigint");
   }
 
@@ -590,15 +595,14 @@ async function prepareSwap(side: "buy" | "sell", p: PrepareSwapParams): Promise<
 
   const ix = buildRallyInstruction(
     ctx.programId,
-    side,
-    { amountIn, minOut, deadline },
+    exactOutput ? `${side}_exact_out` : side,
+    exactOutput ? { amountOut: amountIn, maxIn: minOut, deadline } : { amountIn, minOut, deadline },
     {
       trader: p.trader,
       config: await pdas.config(),
       launch: launchPda,
-      quoteConfig: await pdas.quoteConfig(quoteMint),
-      quoteVault: await pdas.quoteVault(quoteMint),
       referral: p.referrer ? await pdas.referral(quoteMint, p.referrer) : undefined,
+      referralVault: p.referrer ? await pdas.referralVault(await pdas.referral(quoteMint, p.referrer)) : undefined,
       authority,
       launchQuoteVault: await findAssociatedTokenAddress(authority, quoteMint, qp),
       mint: p.mint,
@@ -638,13 +642,32 @@ export const prepareBuy = (p: PrepareSwapParams) => prepareSwap("buy", p);
 /** Exact-input sell: spend `amountIn` tokens for at least `minOut` quote before `deadline`. */
 export const prepareSell = (p: PrepareSwapParams) => prepareSwap("sell", p);
 
+export interface PrepareExactOutSwapParams extends Omit<PrepareSwapParams, "amountIn" | "minOut"> {
+  /** Exact net output, or the matching exact-output quote's amountOut. */
+  amountOut?: bigint;
+  /** Explicit total input bound; alternatively pass quote + slippageBps. */
+  maxIn?: bigint;
+}
+export const prepareBuyExactOut = (p: PrepareExactOutSwapParams) => prepareSwap("buy", { ...p, amountIn: p.amountOut, minOut: p.maxIn }, true);
+export const prepareSellExactOut = (p: PrepareExactOutSwapParams) => prepareSwap("sell", { ...p, amountIn: p.amountOut, minOut: p.maxIn }, true);
+
 // ── Claims, referrals, fee collection ────────────────────────────────────────
 
 export interface PrepareClaimCreatorFeesParams extends SolanaTarget, Reads {
-  creator: AddressOrSigner;
+  /** Deprecated alias for payer. It does not select the recipient. */
+  creator?: AddressOrSigner;
+  /** Pays for recipient ATA creation only; unnecessary when holderQuoteAccount is supplied. */
+  payer?: AddressOrSigner;
+  /** Current NFT holder, or original creator after burn. Otherwise resolved through RPC. */
+  holder?: AddressOrSigner;
+  /** Explicit token account holding the NFT; null only after burn. */
+  feeNftAccount?: Address | null;
+  /** Mark the holder as a signer for CPI by the program controlling a PDA holder. */
+  holderMustSign?: boolean;
+  holderQuoteAccount?: Address;
   mint: Address;
   launch?: LaunchAccount;
-  /** Defaults to the creator's ATA for the quote, created idempotently. */
+  /** Deprecated alias for holderQuoteAccount. Must be the holder's canonical ATA. */
   creatorQuoteAccount?: Address;
   quoteTokenProgram?: Address;
 }
@@ -653,34 +676,92 @@ export interface PrepareClaimCreatorFeesParams extends SolanaTarget, Reads {
 export async function prepareClaimCreatorFees(p: PrepareClaimCreatorFeesParams): Promise<PreparedSolanaTransaction> {
   const ctx = resolveTarget(p);
   const launch = await launchFor(p.mint, p.launch, p.rpc, ctx);
-  if (launch.creator !== addrOf(p.creator)) {
-    throw new RallyError("NO_ACCOUNT", `Only the creator ${launch.creator} can claim this launch's fees`);
-  }
+  const resolved = p.holder && p.feeNftAccount !== undefined ? undefined
+    : await fetchFeeBeneficiary(need(p.rpc, "holder + feeNftAccount (or rpc to resolve the fee NFT)") as FeeBeneficiaryRpc, p.mint, { launch, programId: ctx.programId });
+  const holder = p.holder ?? need(resolved?.holder, "holder");
+  const holderAddress = addrOf(holder);
+  const feeNftAccount = p.feeNftAccount !== undefined ? p.feeNftAccount : resolved!.feeNftAccount;
+  if (resolved && holderAddress !== resolved.holder) throw new RallyError("NO_ACCOUNT", "Holder does not match current fee NFT owner");
+  if (feeNftAccount === null && holderAddress !== launch.creator) throw new RallyError("NO_ACCOUNT", "Burned fee NFT pays the original creator");
   const quoteMint = launch.quoteMint;
   const qp = await quoteProgramFor(quoteMint, p.quoteTokenProgram, p.rpc, ctx);
   const pdas = rallyPdas(ctx.programId);
   const launchPda = await pdas.launch(p.mint);
   const authority = await pdas.authority(launchPda);
-  const creator = addrOf(p.creator);
+  const feeNftMint = await pdas.feeBeneficiary(launchPda);
+  if (launch.feeNftMint !== feeNftMint) throw new RallyError("INVALID_ACCOUNT_DATA", "Register the launch's fee NFT before claiming");
+  const destination = await findAssociatedTokenAddress(holderAddress, quoteMint, qp);
+  const suppliedDestination = p.holderQuoteAccount ?? p.creatorQuoteAccount;
+  if (suppliedDestination && suppliedDestination !== destination) throw new RallyError("NO_ACCOUNT", "Creator fees must go to the holder's canonical quote ATA");
   const ix = buildRallyInstruction(
     ctx.programId,
     "claim_creator_fees",
     {},
     {
-      creator: p.creator,
       config: await pdas.config(),
       launch: launchPda,
       authority,
       quoteMint,
       launchQuoteVault: await findAssociatedTokenAddress(authority, quoteMint, qp),
-      creatorQuoteAccount: p.creatorQuoteAccount ?? (await findAssociatedTokenAddress(creator, quoteMint, qp)),
+      feeNftMint,
+      feeNftAccount,
+      holder,
+      holderQuoteAccount: destination,
       quoteTokenProgram: qp,
       eventAuthority: await pdas.eventAuthority(),
       program: ctx.programId,
     },
   );
-  const setup = p.creatorQuoteAccount ? [] : [await createAtaIdempotentInstruction(p.creator, creator, quoteMint, qp)];
-  return finish(ctx, [...setup, ix], [p.creator]);
+  // IDL cannot express the runtime off-curve signer condition. The controlling
+  // program passes this inner instruction by CPI and supplies its PDA seeds.
+  const holderMustSign = feeNftAccount !== null && (isOffCurveAddress(holderAddress) || p.holderMustSign === true);
+  const claim = holderMustSign ? { ...ix, accounts: ix.accounts!.map((a, index) => index === 7 ? { ...a, role: AccountRole.READONLY_SIGNER, ...(isSigner(holder) ? { signer: holder } : {}) } : a) } : ix;
+  const payer = p.payer ?? p.creator;
+  const setup = suppliedDestination ? [] : [await createAtaIdempotentInstruction(need(payer, "payer for the holder quote ATA"), holderAddress, quoteMint, qp)];
+  return finish(ctx, [...setup, claim], [...(setup.length ? [payer!] : []), ...(holderMustSign ? [holder] : [])]);
+}
+
+/** Permissionless registration of the recorded creator's NFT for legacy launches. */
+export async function prepareRegisterFeeBeneficiary(p: SolanaTarget & Reads & { payer: AddressOrSigner; mint: Address; launch?: LaunchAccount }): Promise<PreparedSolanaTransaction> {
+  const ctx = resolveTarget(p);
+  const launch = await launchFor(p.mint, p.launch, p.rpc, ctx);
+  const pdas = rallyPdas(ctx.programId);
+  const at = await pdas.launch(p.mint);
+  const feeNftMint = await pdas.feeBeneficiary(at);
+  const ix = buildRallyInstruction(ctx.programId, "register_fee_beneficiary", {}, {
+    payer: p.payer, launch: at, authority: await pdas.authority(at), feeNftMint,
+    creator: launch.creator, creatorFeeNftAccount: await findAssociatedTokenAddress(launch.creator, feeNftMint, TOKEN_2022_PROGRAM_ADDRESS),
+    eventAuthority: await pdas.eventAuthority(), program: ctx.programId,
+  });
+  return finish(ctx, [ix], [p.payer]);
+}
+
+export async function prepareSetCreatorClaimEscrow(p: SolanaTarget & { governance: AddressOrSigner; escrow: boolean }): Promise<PreparedSolanaTransaction> {
+  if (typeof p.escrow !== "boolean") throw new RallyError("INVALID_AMOUNT", "escrow must be boolean");
+  const ctx = resolveTarget(p);
+  const pdas = rallyPdas(ctx.programId);
+  return finish(ctx, [buildRallyInstruction(ctx.programId, "set_creator_claim_escrow", { escrow: p.escrow }, {
+    governance: p.governance, config: await pdas.config(), eventAuthority: await pdas.eventAuthority(), program: ctx.programId,
+  })], [p.governance]);
+}
+
+export async function prepareExtendAccount(p: SolanaTarget & { payer: AddressOrSigner; account: Address }): Promise<PreparedSolanaTransaction> {
+  const ctx = resolveTarget(p);
+  return finish(ctx, [buildRallyInstruction(ctx.programId, "extend_account", {}, {
+    payer: p.payer, account: p.account, eventAuthority: await rallyPdas(ctx.programId).eventAuthority(), program: ctx.programId,
+  })], [p.payer]);
+}
+
+export async function prepareMigrateReferral(p: SolanaTarget & Reads & { payer: AddressOrSigner; referrer: Address; quoteMint: Address; quoteTokenProgram?: Address }): Promise<PreparedSolanaTransaction> {
+  const ctx = resolveTarget(p);
+  const pdas = rallyPdas(ctx.programId);
+  const referral = await pdas.referral(p.quoteMint, p.referrer);
+  return finish(ctx, [buildRallyInstruction(ctx.programId, "migrate_referral", {}, {
+    payer: p.payer, referral, referralVault: await pdas.referralVault(referral), quoteConfig: await pdas.quoteConfig(p.quoteMint),
+    quoteVault: await pdas.quoteVault(p.quoteMint), quoteMint: p.quoteMint,
+    quoteTokenProgram: await quoteProgramFor(p.quoteMint, p.quoteTokenProgram, p.rpc, ctx),
+    eventAuthority: await pdas.eventAuthority(), program: ctx.programId,
+  })], [p.payer]);
 }
 
 export interface PrepareReferralParams extends SolanaTarget, Reads {
@@ -690,7 +771,7 @@ export interface PrepareReferralParams extends SolanaTarget, Reads {
 }
 
 /** One-time, per quote: the referrer pays the rent for their balance account so traders never do. */
-export async function prepareRegisterReferrer(p: Pick<PrepareReferralParams, "referrer" | "quoteMint"> & SolanaTarget): Promise<PreparedSolanaTransaction> {
+export async function prepareRegisterReferrer(p: PrepareReferralParams): Promise<PreparedSolanaTransaction> {
   const ctx = resolveTarget(p);
   const pdas = rallyPdas(ctx.programId);
   const ix = buildRallyInstruction(
@@ -699,8 +780,13 @@ export async function prepareRegisterReferrer(p: Pick<PrepareReferralParams, "re
     {},
     {
       referrer: p.referrer,
+      quoteConfig: await pdas.quoteConfig(p.quoteMint),
       quoteMint: p.quoteMint,
       referral: await pdas.referral(p.quoteMint, addrOf(p.referrer)),
+      referralVault: await pdas.referralVault(await pdas.referral(p.quoteMint, addrOf(p.referrer))),
+      quoteTokenProgram: await quoteProgramFor(p.quoteMint, p.quoteTokenProgram, p.rpc, ctx),
+      eventAuthority: await pdas.eventAuthority(),
+      program: ctx.programId,
       systemProgram: SYSTEM_PROGRAM_ADDRESS,
     },
   );
@@ -724,8 +810,7 @@ export async function prepareClaimReferralFees(p: PrepareClaimReferralFeesParams
     {
       referrer: p.referrer,
       referral: await pdas.referral(p.quoteMint, referrer),
-      quoteConfig: await pdas.quoteConfig(p.quoteMint),
-      quoteVault: await pdas.quoteVault(p.quoteMint),
+      referralVault: await pdas.referralVault(await pdas.referral(p.quoteMint, referrer)),
       quoteMint: p.quoteMint,
       referrerQuoteAccount: p.referrerQuoteAccount ?? (await findAssociatedTokenAddress(referrer, p.quoteMint, qp)),
       quoteTokenProgram: qp,

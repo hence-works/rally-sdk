@@ -93,7 +93,11 @@ describe("QuoteConfig / Config / ReferralAccount decoding", () => {
   });
   it("ReferralAccount", () => {
     const w = new W().raw(disc("ReferralAccount")).u8(3).key(addr(1)).key(addr(2)).int(5, 8).int(9, 8);
-    expect(decodeReferral(w.bytes())).toEqual({ bump: 3, referrer: addr(1), quoteMint: addr(2), owed: 5n, earned: 9n });
+    expect(decodeReferral(w.bytes())).toEqual({ bump: 3, referrer: addr(1), quoteMint: addr(2), owed: 5n, earned: 9n, vault: ZERO, vaultBump: 0 });
+    expect(decodeReferral(w.key(addr(7)).u8(250).zeros(63).bytes())).toMatchObject({ vault: addr(7), vaultBump: 250, owed: 5n });
+    for (const length of [0, 8, 88, 90, 120, 184]) {
+      expect(() => decodeReferral(w.bytes().subarray(0,length))).toThrow(RallyError);
+    }
   });
 });
 

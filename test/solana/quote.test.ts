@@ -274,7 +274,7 @@ describe("prepareBuy / prepareSell take a quote", () => {
     const d = dataOf(ix);
     expect(u64At(d, 8)).toBe(60n * SOL);
     expect(u64At(d, 16)).toBe(applySlippage(quote.amountOut, 75));
-    const remaining = ix.accounts!.slice(24).map((a) => a.address);
+    const remaining = ix.accounts!.slice(23).map((a) => a.address);
     expect(remaining).toEqual([await raydiumPdas().bitmap(launch.pool), ...quote.tickArrays]);
     // The quote crosses the outside LP's arrays; the launch's own positions alone would not have listed them.
     expect(quote.tickArrays.length).toBeGreaterThan(2);

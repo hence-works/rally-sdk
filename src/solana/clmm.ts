@@ -193,6 +193,22 @@ export function nextSqrtPriceFromInput(sqrt: bigint, liquidity: bigint, amountIn
     : nextSqrtFromAmount1AddRoundingDown(sqrt, liquidity, amountIn);
 }
 
+/** Raydium `get_next_sqrt_price_from_output`, rounded toward sufficient input. */
+export function nextSqrtPriceFromOutput(sqrt: bigint, liquidity: bigint, amountOut: bigint, zeroForOne: boolean): bigint {
+  if (liquidity <= 0n) throw fail("INSUFFICIENT_LIQUIDITY", "zero liquidity in range");
+  const numerator = liquidity << 64n;
+  if (zeroForOne) {
+    const delta = ceilDiv(amountOut << 64n, liquidity);
+    if (delta >= sqrt) throw fail("INSUFFICIENT_LIQUIDITY", "output exhausts liquidity");
+    return sqrt - delta;
+  }
+  const denominator = numerator - amountOut * sqrt;
+  if (denominator <= 0n) throw fail("INSUFFICIENT_LIQUIDITY", "output exhausts liquidity");
+  const next = ceilDiv(numerator * sqrt, denominator);
+  if (next > U128_MAX) throw fail("INVALID_AMOUNT", "sqrt price overflow");
+  return next;
+}
+
 /**
  * Raydium `get_delta_amounts_for_swap`: `(amountIn, amountOut)` between two prices, input
  * rounded up and output down. `null` when either exceeds u64 (Raydium's `MaxTokenOverflow`).
@@ -230,7 +246,7 @@ export interface SwapStep {
 }
 
 /**
- * Raydium `compute_swap` for an EXACT-INPUT step (the only kind the Rally router sends).
+ * Raydium `compute_swap` for an exact-input or exact-output step.
  * `feeOnInput` is `!zeroForOne` for Rally pools (`collect_fee_on = Token1Only`): a buy pays the
  * pool fee on the quote it spends, a sell pays it on the quote it receives.
  */
@@ -242,13 +258,16 @@ export function computeSwapStep(
   feeRate: bigint,
   zeroForOne: boolean,
   feeOnInput: boolean,
+  exactInput = true,
 ): SwapStep {
-  const amountForPriceCalc = feeOnInput
-    ? (amountRemaining * (FEE_RATE_DENOMINATOR - feeRate)) / FEE_RATE_DENOMINATOR
-    : amountRemaining;
+  if (feeRate < 0n || feeRate >= FEE_RATE_DENOMINATOR) throw fail("INVALID_AMOUNT", "invalid pool fee rate");
+  const amountForPriceCalc = exactInput
+    ? (feeOnInput ? (amountRemaining * (FEE_RATE_DENOMINATOR - feeRate)) / FEE_RATE_DENOMINATOR : amountRemaining)
+    : (feeOnInput ? amountRemaining : ceilDiv(amountRemaining * FEE_RATE_DENOMINATOR, FEE_RATE_DENOMINATOR - feeRate));
+  if (amountForPriceCalc > U64_MAX) throw fail("INVALID_AMOUNT", "gross output exceeds u64");
 
   const atTarget = deltaAmountsForSwap(sqrtTarget, sqrtCurrent, liquidity, zeroForOne);
-  const reachable = atTarget !== null && amountForPriceCalc >= atTarget.amountIn;
+  const reachable = atTarget !== null && amountForPriceCalc >= (exactInput ? atTarget.amountIn : atTarget.amountOut);
 
   let sqrtNext: bigint;
   let amountIn: bigint;
@@ -258,7 +277,7 @@ export function computeSwapStep(
     amountIn = atTarget!.amountIn;
     amountOut = atTarget!.amountOut;
   } else {
-    sqrtNext = nextSqrtPriceFromInput(sqrtCurrent, liquidity, amountForPriceCalc, zeroForOne);
+    sqrtNext = (exactInput ? nextSqrtPriceFromInput : nextSqrtPriceFromOutput)(sqrtCurrent, liquidity, amountForPriceCalc, zeroForOne);
     const d = deltaAmountsForSwap(sqrtNext, sqrtCurrent, liquidity, zeroForOne);
     if (!d) throw fail("INVALID_AMOUNT", "swap step amount exceeds u64");
     amountIn = d.amountIn;
@@ -269,7 +288,19 @@ export function computeSwapStep(
   }
 
   let feeAmount: bigint;
-  if (feeOnInput) {
+  if (!exactInput) {
+    if (feeOnInput) {
+      amountOut = amountOut < amountRemaining ? amountOut : amountRemaining;
+      feeAmount = ceilDiv(amountIn * feeRate, FEE_RATE_DENOMINATOR - feeRate);
+    } else {
+      feeAmount = ceilDiv(amountOut * feeRate, FEE_RATE_DENOMINATOR);
+      const net = amountOut - feeAmount;
+      if (net > amountRemaining) {
+        feeAmount = amountOut - amountRemaining;
+        amountOut = amountRemaining;
+      } else amountOut = net;
+    }
+  } else if (feeOnInput) {
     feeAmount =
       sqrtNext !== sqrtTarget
         ? amountRemaining - amountIn

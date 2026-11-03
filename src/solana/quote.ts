@@ -8,7 +8,7 @@
  * the moment they do. If a needed account cannot be read, or the pool uses something the replay
  * does not model, the quote REFUSES (`QUOTE_UNAVAILABLE`) instead of approximating.
  *
- * Exact-input only, because the program's router is exact-input only.
+ * Supports exact-input and Wave 0 exact-output swaps.
  */
 
 import { getAddressDecoder, type Address, type GetMultipleAccountsApi, type Rpc } from "@solana/kit";
@@ -27,6 +27,7 @@ import {
   firstArrayStart,
   initializedArrayStartsAfter,
   simulateExactIn,
+  simulateExactOut,
   type ClmmPoolState,
   type ClmmTickArray,
 } from "./clmm-swap";
@@ -82,9 +83,27 @@ export function applySlippage(amountOut: bigint, slippageBps: number): bigint {
   return min;
 }
 
+/** Ceiling input bound for an exact-output quote. No implicit tolerance. */
+export function applySlippageExactOut(amountIn: bigint, slippageBps: number): bigint {
+  if (typeof amountIn !== "bigint" || amountIn <= 0n || !Number.isInteger(slippageBps) || slippageBps < 0 || slippageBps >= 10000) {
+    throw new RallyError("INVALID_AMOUNT", "Positive input and integer slippageBps in 0..9999 required");
+  }
+  const result = (amountIn * (BPS + BigInt(slippageBps)) + BPS - 1n) / BPS;
+  if (result >= 1n << 64n) throw new RallyError("INVALID_AMOUNT", "maxIn exceeds u64");
+  return result;
+}
+
+function grossUpFee(net: bigint, bps: bigint): bigint {
+  if (bps < 0n || bps >= BPS) throw new RallyError("INVALID_AMOUNT", "Invalid router fee");
+  return (net * bps + (BPS - bps) - 1n) / (BPS - bps);
+}
+
 // ── swap quote ───────────────────────────────────────────────────────────────
 
 export interface SolanaSwapQuote {
+  /** Absent on legacy exact-input quotes; exact-output quotes always set this. */
+  exactOutput?: boolean;
+  maxIn?: bigint;
   side: "buy" | "sell";
   mint: Address;
   quoteMint: Address;
@@ -137,6 +156,13 @@ export interface QuoteStateInput {
   amountIn: bigint;
   timestamp: bigint;
   slippageBps?: number;
+  /** Internal/public offline selector: amountIn then carries the desired output. Prefer quoteExactOutFromState. */
+  exactOutput?: boolean;
+}
+
+export type QuoteExactOutStateInput = Omit<QuoteStateInput, "amountIn" | "exactOutput"> & { amountOut: bigint };
+export function quoteExactOutFromState(i: QuoteExactOutStateInput): Omit<SolanaSwapQuote, "tickArrays"> {
+  return quoteSwapFromState({ ...i, amountIn: i.amountOut, exactOutput: true });
 }
 
 /**
@@ -150,17 +176,18 @@ export function quoteSwapFromState(i: QuoteStateInput): Omit<SolanaSwapQuote, "t
   if (poolState.mint0 !== launch.mint || poolState.mint1 !== launch.quoteMint) {
     throw new RallyError("INVALID_ACCOUNT_DATA", "The pool is not this launch's (mint orientation mismatch)");
   }
-  if (!(i.amountIn > 0n && i.amountIn < 1n << 64n)) {
+  if (typeof i.amountIn !== "bigint" || !(i.amountIn > 0n && i.amountIn < 1n << 64n)) {
     throw new RallyError("INVALID_AMOUNT", `amountIn must be in 1..2^64-1: ${i.amountIn}`);
   }
   const feeBps = routerFeeBpsAt(launch, i.timestamp);
 
   // Buy: the router fee comes off the top of what was typed, the pool sees the rest.
-  const routerFeeUpFront = buy ? (i.amountIn * feeBps) / BPS : 0n;
+  const exactOutput = i.exactOutput === true;
+  const routerFeeUpFront = exactOutput ? 0n : buy ? (i.amountIn * feeBps) / BPS : 0n;
   const poolIn = i.amountIn - routerFeeUpFront;
   if (poolIn <= 0n) throw new RallyError("INVALID_AMOUNT", "The router fee consumes the whole input");
 
-  const sim = simulateExactIn({
+  const simInput = {
     pool: poolState,
     tradeFeeRate: i.tradeFeeRate,
     getTickArray: i.getTickArray,
@@ -168,7 +195,10 @@ export function quoteSwapFromState(i: QuoteStateInput): Omit<SolanaSwapQuote, "t
     zeroForOne: !buy,
     // The router's own price limits (swap.rs `do_swap`).
     sqrtPriceLimitX64: buy ? MAX_SQRT_PRICE_X64 - 1n : MIN_SQRT_PRICE_X64 + 1n,
-  });
+  };
+  const poolOut = i.amountIn + (exactOutput && !buy ? grossUpFee(i.amountIn, feeBps) : 0n);
+  if (exactOutput && poolOut >= 1n << 64n) throw new RallyError("INVALID_AMOUNT", "Gross output exceeds u64");
+  const sim = exactOutput ? simulateExactOut({ ...simInput, amountOut: poolOut }) : simulateExactIn(simInput);
 
   let amountOut: bigint;
   let amountInUsed: bigint;
@@ -177,7 +207,7 @@ export function quoteSwapFromState(i: QuoteStateInput): Omit<SolanaSwapQuote, "t
   let tokens: bigint;
   if (buy) {
     // A partial fill refunds the router fee in proportion (swap.rs `buy`).
-    routerFee = routerFeeUpFront - (routerFeeUpFront * (poolIn - sim.amountConsumed)) / poolIn;
+    routerFee = exactOutput ? grossUpFee(sim.amountConsumed, feeBps) : routerFeeUpFront - (routerFeeUpFront * (poolIn - sim.amountConsumed)) / poolIn;
     amountInUsed = sim.amountConsumed + routerFee;
     amountOut = sim.amountOut;
     tokens = sim.amountOut;
@@ -185,7 +215,7 @@ export function quoteSwapFromState(i: QuoteStateInput): Omit<SolanaSwapQuote, "t
   } else {
     // Sell: Raydium pays out the quote net of the pool fee; the router takes its cut of that.
     const gross = sim.amountOut;
-    routerFee = (gross * feeBps) / BPS;
+    routerFee = exactOutput ? grossUpFee(i.amountIn, feeBps) : (gross * feeBps) / BPS;
     amountOut = gross - routerFee;
     amountInUsed = sim.amountConsumed;
     tokens = sim.amountConsumed;
@@ -193,6 +223,7 @@ export function quoteSwapFromState(i: QuoteStateInput): Omit<SolanaSwapQuote, "t
     if (amountOut <= 0n) throw new RallyError("INVALID_AMOUNT", "The router fee consumes the whole output");
   }
   if (amountOut <= 0n) throw new RallyError("INVALID_AMOUNT", "Amount is too small: the swap would deliver nothing");
+  if (amountInUsed >= 1n << 64n) throw new RallyError("INVALID_AMOUNT", "Required input exceeds u64");
 
   // Price impact: average fill price vs the spot before the swap, both as quote-per-token ratios.
   const spot = poolState.sqrtPriceX64 * poolState.sqrtPriceX64; // quote/token * 2^128
@@ -204,7 +235,8 @@ export function quoteSwapFromState(i: QuoteStateInput): Omit<SolanaSwapQuote, "t
     mint: i.mint,
     quoteMint: launch.quoteMint,
     pool: i.pool,
-    amountIn: i.amountIn,
+    amountIn: exactOutput ? amountInUsed : i.amountIn,
+    ...(exactOutput ? { exactOutput: true } : {}),
     amountInUsed,
     amountOut,
     fees: {
@@ -224,7 +256,8 @@ export function quoteSwapFromState(i: QuoteStateInput): Omit<SolanaSwapQuote, "t
   };
   if (i.slippageBps !== undefined) {
     quote.slippageBps = i.slippageBps;
-    quote.minOut = applySlippage(amountOut, i.slippageBps);
+    if (exactOutput) quote.maxIn = applySlippageExactOut(amountInUsed, i.slippageBps);
+    else quote.minOut = applySlippage(amountOut, i.slippageBps);
   }
   return quote;
 }
@@ -252,6 +285,8 @@ export interface QuoteSwapParams {
   raydiumClmm?: Address;
 }
 
+export type QuoteExactOutParams = Omit<QuoteSwapParams, "amountIn"> & { amountOut: bigint };
+
 interface Raw {
   data: Uint8Array;
   owner: Address;
@@ -272,7 +307,7 @@ async function getMany(rpc: SolanaQuoteRpc, addrs: Address[]): Promise<(Raw | nu
 const AMM_CONFIG_TRADE_FEE_OFFSET = 47;
 const AMM_CONFIG_MIN_LEN = 53;
 
-async function quoteSwap(side: "buy" | "sell", p: QuoteSwapParams): Promise<SolanaSwapQuote> {
+async function quoteSwap(side: "buy" | "sell", p: QuoteSwapParams, exactOutput = false): Promise<SolanaSwapQuote> {
   const dep = p.chainId === undefined ? undefined : SOLANA_DEPLOYMENTS[p.chainId];
   const programId = (p.programId ?? dep?.rallySolanaProtocol ?? RALLY_SOLANA_PROTOCOL_PROGRAM_ID) as Address;
   const clmm = (p.raydiumClmm ?? dep?.raydiumClmm ?? RAYDIUM_CLMM_DEVNET) as Address;
@@ -338,6 +373,7 @@ async function quoteSwap(side: "buy" | "sell", p: QuoteSwapParams): Promise<Sola
         tradeFeeRate,
         getTickArray: (s) => loaded.get(s),
         amountIn: p.amountIn,
+        exactOutput,
         timestamp,
         ...(p.slippageBps !== undefined ? { slippageBps: p.slippageBps } : {}),
       });
@@ -367,6 +403,11 @@ export const quoteBuySolana = (p: QuoteSwapParams) => quoteSwap("buy", p);
 
 /** Exact-input SELL quote: sell `amountIn` launch tokens (6dp) for `amountOut` NET quote. */
 export const quoteSellSolana = (p: QuoteSwapParams) => quoteSwap("sell", p);
+
+/** Receive exactly amountOut tokens, quoting the total quote input including both fees. */
+export const quoteBuyExactOutSolana = (p: QuoteExactOutParams) => quoteSwap("buy", { ...p, amountIn: p.amountOut }, true);
+/** Receive exactly amountOut quote net of both fees. */
+export const quoteSellExactOutSolana = (p: QuoteExactOutParams) => quoteSwap("sell", { ...p, amountIn: p.amountOut }, true);
 
 // ── first buy ────────────────────────────────────────────────────────────────
 

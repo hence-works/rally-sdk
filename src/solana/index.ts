@@ -22,6 +22,10 @@ export type { GrindMintOptions, GroundMint } from "./mint";
 export { priceScale, priceWadFromSqrtPriceX64 } from "./price";
 export {
   applySlippage,
+  applySlippageExactOut,
+  quoteBuyExactOutSolana,
+  quoteSellExactOutSolana,
+  quoteExactOutFromState,
   quoteBuySolana,
   quoteFirstBuy,
   quoteSellSolana,
@@ -32,6 +36,8 @@ export type {
   FirstBuyQuote,
   QuoteFirstBuyParams,
   QuoteStateInput,
+  QuoteExactOutStateInput,
+  QuoteExactOutParams,
   QuoteSwapParams,
   SolanaQuoteRpc,
   SolanaSwapQuote,
@@ -52,12 +58,19 @@ export {
   fetchPoolSlot0,
   fetchQuoteConfig,
   fetchReferral,
+  fetchFeeBeneficiary,
 } from "./accounts";
-export type { PoolSlot0, ReadOptions, SolanaRpc } from "./accounts";
+export type { PoolSlot0, ReadOptions, SolanaRpc, FeeBeneficiaryRpc, FeeBeneficiaryState } from "./accounts";
 export {
   buildRallyInstruction,
   createAtaIdempotentInstruction,
   prepareBuy,
+  prepareBuyExactOut,
+  prepareSellExactOut,
+  prepareRegisterFeeBeneficiary,
+  prepareSetCreatorClaimEscrow,
+  prepareExtendAccount,
+  prepareMigrateReferral,
   prepareClaimCreatorFees,
   prepareClaimReferralFees,
   prepareCollectFees,
@@ -74,6 +87,7 @@ export type {
   PrepareOpenPoolParams,
   PrepareReferralParams,
   PrepareSwapParams,
+  PrepareExactOutSwapParams,
   PreparedSolanaTransaction,
   SolanaTarget,
 } from "./instructions";

@@ -61,15 +61,12 @@ export const RALLY_SOLANA_PROTOCOL_IDL = {
           "writable": true
         },
         {
-          "name": "quote_config",
-          "writable": true
-        },
-        {
-          "name": "quote_vault",
-          "writable": true
-        },
-        {
           "name": "referral",
+          "writable": true,
+          "optional": true
+        },
+        {
+          "name": "referral_vault",
           "writable": true,
           "optional": true
         },
@@ -142,6 +139,103 @@ export const RALLY_SOLANA_PROTOCOL_IDL = {
       "args": [
         { "name": "amount_in", "type": "u64" },
         { "name": "min_out", "type": "u64" },
+        { "name": "deadline", "type": "i64" }
+      ]
+    },
+    {
+      "name": "buy_exact_out",
+      "discriminator": [24, 211, 116, 40, 105, 3, 153, 56],
+      "accounts": [
+        {
+          "name": "trader",
+          "signer": true
+        },
+        {
+          "name": "config"
+        },
+        {
+          "name": "launch",
+          "writable": true
+        },
+        {
+          "name": "referral",
+          "writable": true,
+          "optional": true
+        },
+        {
+          "name": "referral_vault",
+          "writable": true,
+          "optional": true
+        },
+        {
+          "name": "authority"
+        },
+        {
+          "name": "launch_quote_vault",
+          "writable": true
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "quote_mint"
+        },
+        {
+          "name": "trader_token_account",
+          "writable": true
+        },
+        {
+          "name": "trader_quote_account",
+          "writable": true
+        },
+        {
+          "name": "clmm_program",
+          "address": "DRayAUgENGQBKVaX8owNhgzkEDyoHTGVEGHVJT1E9pfH"
+        },
+        {
+          "name": "amm_config"
+        },
+        {
+          "name": "pool_state",
+          "writable": true
+        },
+        {
+          "name": "pool_token_vault",
+          "writable": true
+        },
+        {
+          "name": "pool_quote_vault",
+          "writable": true
+        },
+        {
+          "name": "observation_state",
+          "writable": true
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "token_program_2022",
+          "address": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
+        },
+        {
+          "name": "quote_token_program"
+        },
+        {
+          "name": "memo_program",
+          "address": "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        { "name": "amount_out", "type": "u64" },
+        { "name": "max_in", "type": "u64" },
         { "name": "deadline", "type": "i64" }
       ]
     },
@@ -279,10 +373,6 @@ export const RALLY_SOLANA_PROTOCOL_IDL = {
       "discriminator": [0, 23, 125, 234, 156, 118, 134, 89],
       "accounts": [
         {
-          "name": "creator",
-          "signer": true
-        },
-        {
           "name": "config"
         },
         {
@@ -300,11 +390,25 @@ export const RALLY_SOLANA_PROTOCOL_IDL = {
           "writable": true
         },
         {
-          "name": "creator_quote_account",
+          "name": "fee_nft_mint"
+        },
+        {
+          "name": "fee_nft_account",
+          "optional": true
+        },
+        {
+          "name": "holder"
+        },
+        {
+          "name": "holder_quote_account",
           "writable": true
         },
         {
           "name": "quote_token_program"
+        },
+        {
+          "name": "token_program_2022",
+          "address": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
         },
         {
           "name": "event_authority"
@@ -393,11 +497,7 @@ export const RALLY_SOLANA_PROTOCOL_IDL = {
           "writable": true
         },
         {
-          "name": "quote_config",
-          "writable": true
-        },
-        {
-          "name": "quote_vault",
+          "name": "referral_vault",
           "writable": true
         },
         {
@@ -567,6 +667,14 @@ export const RALLY_SOLANA_PROTOCOL_IDL = {
           "optional": true
         },
         {
+          "name": "fee_nft_mint",
+          "writable": true
+        },
+        {
+          "name": "creator_fee_nft_account",
+          "writable": true
+        },
+        {
           "name": "token_program_2022",
           "address": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
         },
@@ -598,6 +706,32 @@ export const RALLY_SOLANA_PROTOCOL_IDL = {
           }
         }
       ]
+    },
+    {
+      "name": "extend_account",
+      "discriminator": [234, 102, 194, 203, 150, 72, 62, 229],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "account",
+          "writable": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": []
     },
     {
       "name": "fund_dividend_epoch",
@@ -781,6 +915,50 @@ export const RALLY_SOLANA_PROTOCOL_IDL = {
       "args": [
         { "name": "index", "type": "u8" }
       ]
+    },
+    {
+      "name": "migrate_referral",
+      "discriminator": [163, 65, 217, 120, 180, 32, 167, 119],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "referral",
+          "writable": true
+        },
+        {
+          "name": "referral_vault",
+          "writable": true
+        },
+        {
+          "name": "quote_config",
+          "writable": true
+        },
+        {
+          "name": "quote_vault",
+          "writable": true
+        },
+        {
+          "name": "quote_mint"
+        },
+        {
+          "name": "quote_token_program"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": []
     },
     {
       "name": "open_pool",
@@ -1028,6 +1206,54 @@ export const RALLY_SOLANA_PROTOCOL_IDL = {
       "args": []
     },
     {
+      "name": "register_fee_beneficiary",
+      "discriminator": [243, 211, 249, 148, 96, 69, 217, 54],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "launch",
+          "writable": true
+        },
+        {
+          "name": "authority"
+        },
+        {
+          "name": "fee_nft_mint",
+          "writable": true
+        },
+        {
+          "name": "creator"
+        },
+        {
+          "name": "creator_fee_nft_account",
+          "writable": true
+        },
+        {
+          "name": "token_program_2022",
+          "address": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
+        },
+        {
+          "name": "associated_token_program",
+          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "register_referrer",
       "discriminator": [122, 229, 215, 169, 100, 145, 198, 120],
       "accounts": [
@@ -1037,6 +1263,9 @@ export const RALLY_SOLANA_PROTOCOL_IDL = {
           "signer": true
         },
         {
+          "name": "quote_config"
+        },
+        {
           "name": "quote_mint"
         },
         {
@@ -1044,8 +1273,21 @@ export const RALLY_SOLANA_PROTOCOL_IDL = {
           "writable": true
         },
         {
+          "name": "referral_vault",
+          "writable": true
+        },
+        {
+          "name": "quote_token_program"
+        },
+        {
           "name": "system_program",
           "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
         }
       ],
       "args": []
@@ -1174,15 +1416,12 @@ export const RALLY_SOLANA_PROTOCOL_IDL = {
           "writable": true
         },
         {
-          "name": "quote_config",
-          "writable": true
-        },
-        {
-          "name": "quote_vault",
-          "writable": true
-        },
-        {
           "name": "referral",
+          "writable": true,
+          "optional": true
+        },
+        {
+          "name": "referral_vault",
           "writable": true,
           "optional": true
         },
@@ -1256,6 +1495,126 @@ export const RALLY_SOLANA_PROTOCOL_IDL = {
         { "name": "amount_in", "type": "u64" },
         { "name": "min_out", "type": "u64" },
         { "name": "deadline", "type": "i64" }
+      ]
+    },
+    {
+      "name": "sell_exact_out",
+      "discriminator": [95, 200, 71, 34, 8, 9, 11, 166],
+      "accounts": [
+        {
+          "name": "trader",
+          "signer": true
+        },
+        {
+          "name": "config"
+        },
+        {
+          "name": "launch",
+          "writable": true
+        },
+        {
+          "name": "referral",
+          "writable": true,
+          "optional": true
+        },
+        {
+          "name": "referral_vault",
+          "writable": true,
+          "optional": true
+        },
+        {
+          "name": "authority"
+        },
+        {
+          "name": "launch_quote_vault",
+          "writable": true
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "quote_mint"
+        },
+        {
+          "name": "trader_token_account",
+          "writable": true
+        },
+        {
+          "name": "trader_quote_account",
+          "writable": true
+        },
+        {
+          "name": "clmm_program",
+          "address": "DRayAUgENGQBKVaX8owNhgzkEDyoHTGVEGHVJT1E9pfH"
+        },
+        {
+          "name": "amm_config"
+        },
+        {
+          "name": "pool_state",
+          "writable": true
+        },
+        {
+          "name": "pool_token_vault",
+          "writable": true
+        },
+        {
+          "name": "pool_quote_vault",
+          "writable": true
+        },
+        {
+          "name": "observation_state",
+          "writable": true
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "token_program_2022",
+          "address": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
+        },
+        {
+          "name": "quote_token_program"
+        },
+        {
+          "name": "memo_program",
+          "address": "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        { "name": "amount_out", "type": "u64" },
+        { "name": "max_in", "type": "u64" },
+        { "name": "deadline", "type": "i64" }
+      ]
+    },
+    {
+      "name": "set_creator_claim_escrow",
+      "discriminator": [183, 83, 202, 25, 44, 7, 6, 171],
+      "accounts": [
+        {
+          "name": "governance",
+          "signer": true
+        },
+        {
+          "name": "config",
+          "writable": true
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        { "name": "escrow", "type": "bool" }
       ]
     },
     {
@@ -1777,12 +2136,14 @@ export const RALLY_SOLANA_PROTOCOL_IDL = {
         { "name": "dividend_epoch", "type": "u64" },
         { "name": "dividend_reserved", "type": "u64" },
         { "name": "support_nonce", "type": "u16" },
+        { "name": "fee_nft_mint", "type": "pubkey" },
+        { "name": "fee_nft_bump", "type": "u8" },
         {
           "name": "reserved",
           "type": {
             "array": [
               "u8",
-              128
+              95
             ]
           }
         }
@@ -1870,7 +2231,18 @@ export const RALLY_SOLANA_PROTOCOL_IDL = {
         { "name": "referrer", "type": "pubkey" },
         { "name": "quote_mint", "type": "pubkey" },
         { "name": "owed", "type": "u64" },
-        { "name": "earned", "type": "u64" }
+        { "name": "earned", "type": "u64" },
+        { "name": "vault", "type": "pubkey" },
+        { "name": "vault_bump", "type": "u8" },
+        {
+          "name": "reserved",
+          "type": {
+            "array": [
+              "u8",
+              63
+            ]
+          }
+        }
       ]
     }
   ]

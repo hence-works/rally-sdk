@@ -3,7 +3,7 @@
  * revision the Rally program vendors), over decoded `PoolState` and `TickArrayState` bytes.
  *
  * Scope, deliberately narrow so the replay is exact rather than approximate:
- *  - exact INPUT only (the Rally router is exact-input only);
+ *  - exact input and exact output (Wave 0);
  *  - a static fee tier. A pool with dynamic-fee state is refused: its fee depends on a
  *    volatility accumulator that moves with every tick crossed, and is not modelled;
  *  - no limit orders. A swap that REACHES a tick carrying limit-order state is refused, never skipped;
@@ -265,6 +265,14 @@ export interface SwapSimResult {
 
 /** Replay `swap_internal` (exact input, static fee, no limit orders). */
 export function simulateExactIn(input: SwapSimInput): SwapSimResult {
+  return simulateSwap(input, true);
+}
+
+export function simulateExactOut(input: Omit<SwapSimInput, "amountIn"> & { amountOut: bigint }): SwapSimResult {
+  return simulateSwap({ ...input, amountIn: input.amountOut }, false);
+}
+
+function simulateSwap(input: SwapSimInput, exactInput: boolean): SwapSimResult {
   const { pool, tradeFeeRate, zeroForOne, sqrtPriceLimitX64 } = input;
   const spacing = pool.tickSpacing;
   if (input.amountIn <= 0n) throw new RallyError("INVALID_AMOUNT", "amountIn must be positive");
@@ -359,10 +367,11 @@ export function simulateExactIn(input: SwapSimInput): SwapSimResult {
     const priceChange = sqrt !== target;
     let stepSqrtNext = target;
     if (priceChange) {
-      const step = computeSwapStep(sqrt, target, liquidity, remaining, tradeFeeRate, zeroForOne, feeOnInput);
-      remaining -= feeOnInput ? step.amountIn + step.feeAmount : step.amountIn;
+      const step = computeSwapStep(sqrt, target, liquidity, remaining, tradeFeeRate, zeroForOne, feeOnInput, exactInput);
+      const stepInput = feeOnInput ? step.amountIn + step.feeAmount : step.amountIn;
+      remaining -= exactInput ? stepInput : step.amountOut;
       if (remaining < 0n) throw new RallyError("INVALID_AMOUNT", "swap step consumed more than the input");
-      calculated += step.amountOut;
+      calculated += exactInput ? step.amountOut : stepInput;
       poolFee += step.feeAmount;
       stepSqrtNext = step.sqrtPriceNextX64;
     }
@@ -390,12 +399,13 @@ export function simulateExactIn(input: SwapSimInput): SwapSimResult {
   }
 
   const consumed = input.amountIn - remaining;
+  if (!exactInput && remaining !== 0n) throw new RallyError("INSUFFICIENT_LIQUIDITY", "Exact-output swaps must fill the entire output");
   if (consumed === 0n || calculated === 0n) {
     throw new RallyError("INVALID_AMOUNT", "Amount is too small: the pool would round the fill to zero (TooSmallInputOrOutputAmount)");
   }
   return {
-    amountConsumed: consumed,
-    amountOut: calculated,
+    amountConsumed: exactInput ? consumed : calculated,
+    amountOut: exactInput ? calculated : consumed,
     poolFee,
     endSqrtPriceX64: sqrt,
     endTick: tick,

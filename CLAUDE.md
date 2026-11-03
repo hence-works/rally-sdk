@@ -100,8 +100,14 @@ who cannot patch it.
     array, dynamic-fee state, a reached tick with limit orders, tick spacing < 15, too many arrays.
   - Slippage is never defaulted: `minOut` comes from the caller, or from `quote` + the caller's own
     `slippageBps`. A `quote.minOut` is never adopted implicitly by `prepare*`.
-  - Exact-output is NOT possible (the program router is exact-input only); do not add an exact-out API
-    until the program grows one.
+  - Wave 0 supports exact-output through `quoteBuyExactOutSolana` / `quoteSellExactOutSolana`
+    and `prepareBuyExactOut` / `prepareSellExactOut`. `amountOut` is the net recipient amount;
+    `maxIn` includes all fees and uses ceiling slippage. Both bounds are explicit, never inferred
+    from a quote's optional `maxIn`. Partial exact-output fills are rejected.
+  - Creator claims pay the fee NFT holder (or original creator only after burn), never an arbitrary
+    caller. Resolve the holder from Token-2022 state. Off-curve holders must sign through CPI.
+    A payer only funds ATA creation. Referral balances live in per-referrer vaults; legacy reads
+    expose a zero vault until extension/migration. Never add shared quote vault writes to swaps.
   - Anything that changes this math must keep `test/solana/golden.test.ts` byte-exact. The golden
     fixture (`test/solana/golden/fixtures/local-validator.json`) is produced by `golden/harness.ts`
     against the DEPLOYED program cloned into a local validator (`golden/validator.sh`); regenerate it

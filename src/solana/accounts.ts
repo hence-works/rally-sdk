@@ -1,7 +1,7 @@
-import { getBase64Encoder, type Address, type GetAccountInfoApi, type Rpc } from "@solana/kit";
+import { getAddressDecoder, getBase64Encoder, type Address, type GetAccountInfoApi, type GetTokenLargestAccountsApi, type Rpc } from "@solana/kit";
 import { RallyError } from "../errors";
 import { decodeAccount } from "./codec";
-import { CLOCK_SYSVAR_ADDRESS, RALLY_SOLANA_PROTOCOL_PROGRAM_ID, RAYDIUM_CLMM_DEVNET } from "./constants";
+import { CLOCK_SYSVAR_ADDRESS, RALLY_SOLANA_PROTOCOL_PROGRAM_ID, RAYDIUM_CLMM_DEVNET, TOKEN_2022_PROGRAM_ADDRESS, SYSTEM_PROGRAM_ADDRESS } from "./constants";
 import { rallyPdas } from "./pda";
 import { priceWadFromSqrtPriceX64 } from "./price";
 import type {
@@ -17,7 +17,54 @@ export type SolanaRpc = Rpc<GetAccountInfoApi>;
 export const decodeLaunch = (data: Uint8Array) => decodeAccount<LaunchAccount>("Launch", data);
 export const decodeQuoteConfig = (data: Uint8Array) => decodeAccount<QuoteConfigAccount>("QuoteConfig", data);
 export const decodeConfig = (data: Uint8Array) => decodeAccount<ConfigAccount>("Config", data);
-export const decodeReferral = (data: Uint8Array) => decodeAccount<ReferralAccountData>("ReferralAccount", data);
+export const decodeReferral = (data: Uint8Array): ReferralAccountData => {
+  // Legacy 89-byte accounts remain readable for migration planning. Padding is
+  // explicit only for that exact historical layout; truncated new data fails.
+  if (data.length === 89) {
+    const padded = new Uint8Array(185);
+    padded.set(data);
+    return decodeAccount<ReferralAccountData>("ReferralAccount", padded);
+  }
+  return decodeAccount<ReferralAccountData>("ReferralAccount", data);
+};
+
+export type FeeBeneficiaryRpc = SolanaRpc & Rpc<GetTokenLargestAccountsApi>;
+export interface FeeBeneficiaryState {
+  feeNftMint: Address;
+  holder: Address;
+  feeNftAccount: Address | null;
+  burned: boolean;
+}
+
+/** Resolve the current title holder from Token-2022 state, never from creator metadata. */
+export async function fetchFeeBeneficiary(rpc: FeeBeneficiaryRpc, mint: Address, opts: ReadOptions & { launch?: LaunchAccount } = {}): Promise<FeeBeneficiaryState> {
+  const launch = opts.launch ?? await fetchLaunch(rpc, mint, opts);
+  const programId = opts.programId ?? RALLY_SOLANA_PROTOCOL_PROGRAM_ID;
+  if (launch.mint !== mint) throw new RallyError("LAUNCH_NOT_FOUND", "Launch mint mismatch");
+  const expected = await rallyPdas(programId).feeBeneficiary(await rallyPdas(programId).launch(mint));
+  if (!launch.feeNftMint || launch.feeNftMint === SYSTEM_PROGRAM_ADDRESS) throw new RallyError("UNSUPPORTED", "Register the launch fee beneficiary before claiming");
+  if (launch.feeNftMint !== expected) throw new RallyError("INVALID_ACCOUNT_DATA", "Fee NFT mint is not the launch PDA");
+  const account = await getAccount(rpc, expected);
+  if (!account) throw new RallyError("INVALID_ACCOUNT_DATA", "Fee NFT mint is missing");
+  requireOwner(account, TOKEN_2022_PROGRAM_ADDRESS, "Fee NFT mint", expected);
+  if (account.data.length < 82 || account.data[44] !== 0 || account.data[45] !== 1) throw new RallyError("INVALID_ACCOUNT_DATA", "Invalid fee NFT mint");
+  const supply = new DataView(account.data.buffer, account.data.byteOffset).getBigUint64(36, true);
+  if (supply === 0n) return { feeNftMint: expected, holder: launch.creator, feeNftAccount: null, burned: true };
+  if (supply !== 1n) throw new RallyError("INVALID_ACCOUNT_DATA", "Fee NFT supply must be zero or one");
+  if (typeof rpc.getTokenLargestAccounts !== "function") throw new RallyError("MISSING_ADDRESS", "Fee holder lookup requires getTokenLargestAccounts RPC support, or explicit holder + feeNftAccount");
+  const largest = await rpc.getTokenLargestAccounts(expected).send();
+  const candidates = largest.value.filter(a => a.amount === "1");
+  if (candidates.length !== 1) throw new RallyError("INVALID_ACCOUNT_DATA", "Cannot resolve unique fee NFT holder; retry the read");
+  const at = candidates[0]!.address;
+  const token = await getAccount(rpc, at);
+  if (!token) throw new RallyError("INVALID_ACCOUNT_DATA", "Fee NFT account is missing; retry the read");
+  requireOwner(token, TOKEN_2022_PROGRAM_ADDRESS, "Fee NFT token account", at);
+  const decode = getAddressDecoder();
+  if (token.data.length < 165 || decode.decode(token.data.subarray(0,32)) !== expected || new DataView(token.data.buffer, token.data.byteOffset).getBigUint64(64,true) !== 1n || token.data[108] !== 1) {
+    throw new RallyError("INVALID_ACCOUNT_DATA", "Invalid fee NFT holder account; retry the read");
+  }
+  return { feeNftMint: expected, holder: decode.decode(token.data.subarray(32,64)), feeNftAccount: at, burned: false };
+}
 
 interface RawAccount {
   data: Uint8Array;
