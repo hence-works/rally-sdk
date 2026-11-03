@@ -59,7 +59,9 @@ describe("grindMint suffix", () => {
     expect(a.address.endsWith("Rx")).toBe(true);
     expect(a.address).toBe(b.address);
     expect(a.attempts).toBe(b.attempts);
-  });
+    // Two base58 characters against the I-7 bound is ~58^2 x 43 keypairs: seconds locally,
+    // past vitest's 5 s default on a shared CI runner.
+  }, 60_000);
 
   it("is case-sensitive: base58 distinguishes a from A", async () => {
     const lower = await grindMint(HIGH, { suffix: "a", randomSeed: stream() });

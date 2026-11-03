@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -24,19 +24,24 @@ import {
 } from "../src/feebeneficiary";
 
 const here = dirname(fileURLToPath(import.meta.url));
+// The protocol's manifests sit beside this package only inside the monorepo. The SDK's own
+// standalone CI has no sibling checkout, so the sync comparison runs where they exist; every
+// other test below reads the baked DEPLOYMENTS and runs everywhere.
 const manifests = resolve(here, "../../rally-protocol/deployments");
-const files = readdirSync(manifests).filter((f) => /^\d+\.json$/.test(f) && f !== "31337.json");
+const hasManifests = existsSync(manifests);
+const manifestFiles = () => readdirSync(manifests).filter((f) => /^\d+\.json$/.test(f) && f !== "31337.json");
 
 const PID: Hex = "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef";
 const ME: Address = getAddress("0x00000000000000000000000000000000000000a1");
 const SPLITTER: Address = getAddress("0x00000000000000000000000000000000000000b2");
 
-describe("sync:deployments carries the fee beneficiary", () => {
+describe.skipIf(!hasManifests)("sync:deployments carries the fee beneficiary", () => {
   it("--check passes, so the bundle covers the key", () => {
     execFileSync(process.execPath, [resolve(here, "../scripts/sync-deployments.mjs"), "--check"], { stdio: "pipe" });
   });
 
   it("every V2Deployments entry of all six manifests lands in the bundle, per generation", () => {
+    const files = manifestFiles();
     expect(files).toHaveLength(6);
     let seen = 0;
     for (const f of files) {
