@@ -113,10 +113,10 @@ who cannot patch it.
     against the DEPLOYED program cloned into a local validator (`golden/validator.sh`); regenerate it
     after the program or Raydium is upgraded. `golden/vectors/` holds Rust-generated vectors from the
     program crate's own math.
-- `grindMint` takes an optional `suffix` (case-sensitive base58, at most 3 characters). It is a plain
+- `grindMint` takes an optional `suffix` (case-sensitive base58, at most 5 characters). It is a plain
   keypair loop over WebCrypto (about 1k/s), so it is only practical to 2 characters against wSOL
-  (the I-7 ordering rule already costs ~43x there). Never add a prefix option: ordering pins the
-  high bytes.
+  without distributed or durable workers (the I-7 ordering rule already costs ~43x there). Never
+  add a prefix option: ordering pins the high bytes.
 - Publishing this surface exposes the program id and IDL; the owner decides when.
 
 ## Commands

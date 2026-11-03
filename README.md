@@ -566,7 +566,7 @@ import { createSolanaRpc } from "@solana/kit";
 const rpc = createSolanaRpc("https://api.devnet.solana.com");
 
 // 1. Grind a mint that sorts below the quote (I-7), THEN pin metadata at /7565165/<mint>.json.
-//    Optionally pin the address's last characters too (case-sensitive base58, at most 3).
+//    Optionally pin the address's last characters too (case-sensitive base58, at most 5).
 const mint = await grindMint(WSOL_MINT /*, { suffix: "fun" } */);
 
 // 2. Two transactions: they do not fit in one (1,644 bytes vs the 1,232 limit, even with the
@@ -682,11 +682,12 @@ trades. Wave 0 exact-output replay has offline state, rounding, cross-tick and r
 refresh the validator fixtures to check SDK exact-output quotes against actual fills, including
 `maxIn` equal to the quote and one unit below it, before treating that parity as verified.
 
-`grindMint(quote, { suffix })` pins the last 1 to 3 base58 characters (case-sensitive) of the mint
+`grindMint(quote, { suffix })` pins the last 1 to 5 base58 characters (case-sensitive) of the mint
 address while keeping it below the quote (I-7). Each character costs about 58x, on top of the
 ordering rule (about 43x against wSOL): at roughly a thousand keypairs a second, one character takes
-seconds, two take minutes and three take hours. Run it in a Worker; `signal` and `onProgress` are
-there for that.
+seconds, two take minutes, three take hours, four take days, and five take about a year on average.
+The default limit is six times the expected attempts, so long suffixes need distributed or durable
+workers in practice. `signal` and `onProgress` support cancellation and progress reporting.
 
 ## Creator-fee NFT (protocol v2)
 

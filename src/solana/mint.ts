@@ -14,12 +14,13 @@ export interface GrindMintOptions {
   /** Whether the returned signer's private key stays exportable (default false). */
   extractable?: boolean;
   /**
-   * Make the base58 address END with these characters (case-sensitive, 1 to 3 characters of the
+   * Make the base58 address END with these characters (case-sensitive, 1 to 5 characters of the
    * base58 alphabet). Each character costs about 58x more attempts, multiplied by the ordering
    * rule's own cost (about 43x against wSOL, whose first byte is 0x06; a quote that sorts higher
    * costs less). A candidate is a WebCrypto keypair, around a thousand per second per thread, so
-   * against wSOL one character takes seconds, two take minutes and three take hours: grind in a
-   * Worker, pass `signal` to cancel and `onProgress` to show it. A SUFFIX (never a prefix) keeps
+   * against wSOL one character takes seconds, two take minutes, three take hours, four take days,
+   * and five take about a year on average: grind in a Worker, pass `signal` to cancel and
+   * `onProgress` to show it. A SUFFIX (never a prefix) keeps
    * this compatible with I-7: ordering is decided by the high bytes of the key, the suffix by
    * the low ones, so the two costs multiply rather than conflict.
    */
@@ -31,7 +32,7 @@ export interface GrindMintOptions {
 }
 
 /** The longest suffix `grindMint` will search for. */
-export const MAX_MINT_SUFFIX_LENGTH = 3;
+export const MAX_MINT_SUFFIX_LENGTH = 5;
 const BASE58 = /^[1-9A-HJ-NP-Za-km-z]+$/;
 
 export interface GroundMint {
@@ -51,7 +52,7 @@ export interface GroundMint {
  *
  * With `suffix`, also grinds the base58 tail of the address. Unlike the EVM miner there is no
  * WASM engine behind this: every candidate is an ed25519 keypair, so the search is the plain
- * keypair loop, bounded to 3 characters because each one multiplies it by 58.
+ * keypair loop, bounded to 5 characters because each one multiplies it by 58.
  */
 export async function grindMint(quoteMint: Address, opts: GrindMintOptions = {}): Promise<GroundMint> {
   const suffix = opts.suffix;

@@ -1,6 +1,6 @@
 import { createKeyPairSignerFromPrivateKeyBytes } from "@solana/kit";
 import { describe, expect, it } from "vitest";
-import { RallyError, WSOL_MINT, grindMint, sortsBelow } from "../../src/solana";
+import { MAX_MINT_SUFFIX_LENGTH, RallyError, WSOL_MINT, grindMint, sortsBelow } from "../../src/solana";
 import { addr } from "./fixtures";
 
 describe("grindMint (I-7)", () => {
@@ -75,8 +75,18 @@ describe("grindMint suffix", () => {
     await expect(grindMint(addr(0), { suffix: "a", maxAttempts: 300, randomSeed: stream() })).rejects.toMatchObject({ code: "MINING_FAILED" });
   });
 
-  it("rejects what cannot be a base58 suffix, and anything over 3 characters", async () => {
-    for (const suffix of ["", "abcd", "0", "O", "I", "l", "a!", "a b"]) {
+  it("accepts up to five base58 characters and rejects anything longer", async () => {
+    expect(MAX_MINT_SUFFIX_LENGTH).toBe(5);
+    await expect(grindMint(addr(0), { suffix: "abcde", maxAttempts: 1, randomSeed: stream() })).rejects.toMatchObject({
+      code: "MINING_FAILED",
+      details: { attempts: 1, suffix: "abcde" },
+    });
+    await expect(grindMint(WSOL_MINT, { suffix: "abcdef" })).rejects.toMatchObject({
+      code: "MINING_FAILED",
+      details: { suffix: "abcdef" },
+    });
+
+    for (const suffix of ["", "0", "O", "I", "l", "a!", "a b"]) {
       await expect(grindMint(WSOL_MINT, { suffix })).rejects.toMatchObject({ code: "MINING_FAILED" });
     }
     await expect(grindMint(WSOL_MINT, { suffix: 5 as never })).rejects.toMatchObject({ code: "MINING_FAILED" });
