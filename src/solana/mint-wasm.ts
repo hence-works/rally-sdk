@@ -1,6 +1,6 @@
 import { createKeyPairSignerFromPrivateKeyBytes, type Address, type KeyPairSigner } from "@solana/kit";
 import { RallyError } from "../errors";
-import { addressBytes, sortsBelow } from "./address";
+import { addressBytes } from "./address";
 import { SOLANA_MINT_WASM_BASE64 } from "./mint-wasm-bin";
 
 const MAX_U64 = (1n << 64n) - 1n;
@@ -8,7 +8,6 @@ const MAX_U64 = (1n << 64n) - 1n;
 export interface MintWasmExports {
   memory: WebAssembly.Memory;
   master_seed_ptr(): number;
-  quote_ptr(): number;
   suffix_ptr(): number;
   configure(suffixLength: number): number | void;
   mine(start: bigint, stride: bigint, budget: number): number;
@@ -79,7 +78,6 @@ function yieldToHost(): Promise<void> {
 
 /** Internal adapter for the generated Solana ed25519 vanity-miner module. */
 export async function mineMintSuffixWasm(
-  quoteMint: Address,
   suffix: string,
   options: MineMintSuffixWasmOptions,
 ): Promise<WasmGroundMint> {
@@ -112,7 +110,6 @@ export async function mineMintSuffixWasm(
     wasm.clear();
     const memory = new Uint8Array(wasm.memory.buffer);
     memory.set(options.masterSeed, wasm.master_seed_ptr());
-    memory.set(addressBytes(quoteMint), wasm.quote_ptr());
     memory.set(new TextEncoder().encode(suffix), wasm.suffix_ptr());
     const configured = wasm.configure(suffix.length);
     if (typeof configured === "number" && configured < 0) {
@@ -153,8 +150,7 @@ export async function mineMintSuffixWasm(
           const reconstructedPublicKey = addressBytes(signer.address);
           if (
             !equalBytes(returnedPublicKey, reconstructedPublicKey) ||
-            !signer.address.endsWith(suffix) ||
-            !sortsBelow(signer.address, quoteMint)
+            !signer.address.endsWith(suffix)
           ) {
             throw new RallyError("MINING_FAILED", "Solana vanity miner returned an invalid keypair");
           }
@@ -185,8 +181,8 @@ export async function mineMintSuffixWasm(
 
     throw new RallyError(
       "MINING_FAILED",
-      `No mint ending in "${suffix}" and sorting below ${quoteMint} found in ${options.maxAttempts} attempts`,
-      { details: { quoteMint, attempts: options.maxAttempts, suffix } },
+      `No mint ending in "${suffix}" found in ${options.maxAttempts} attempts`,
+      { details: { attempts: options.maxAttempts, suffix } },
     );
   } finally {
     wasm?.clear();

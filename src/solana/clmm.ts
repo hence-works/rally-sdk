@@ -247,8 +247,9 @@ export interface SwapStep {
 
 /**
  * Raydium `compute_swap` for an exact-input or exact-output step.
- * `feeOnInput` is `!zeroForOne` for Rally pools (`collect_fee_on = Token1Only`): a buy pays the
- * pool fee on the quote it spends, a sell pays it on the quote it receives.
+ * `feeOnInput` is derived from Raydium's `collect_fee_on` side and swap direction. Rally selects
+ * the canonical side holding quote, so a buy pays the pool fee on quote input and a sell pays it
+ * on quote output.
  */
 export function computeSwapStep(
   sqrtCurrent: bigint,

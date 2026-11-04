@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { quoteBuySolana, quoteFirstBuy, quoteSellSolana, applySlippage } from "../../src/solana";
+import { quoteBuySolana, quoteFirstBuy, quoteSellSolana, applySlippage, WSOL_MINT } from "../../src/solana";
 import { fx, MINT, rpcFor } from "./golden/load";
 
 /**
@@ -50,6 +50,8 @@ describe("golden: first buy", () => {
   it("the quote is the exact cost: max accepted, one less reverts FirstBuySlippage", async () => {
     const f = fx.firstBuy;
     const q = await quoteFirstBuy({
+      mint: MINT,
+      quoteMint: WSOL_MINT,
       firstBuyTokens: BigInt(f.firstBuyTokens),
       curvePreset: 0,
       totalSupply: 1_000_000_000_000_000n,

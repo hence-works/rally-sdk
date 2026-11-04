@@ -151,7 +151,7 @@ describe("buy / sell", () => {
 });
 
 describe("create_launch", () => {
-  it("encodes CreateLaunchArgs in Borsh and checks I-7", async () => {
+  it("encodes CreateLaunchArgs in Borsh", async () => {
     const ground = await grindMint(WSOL_MINT);
     const creator = addr(40);
     const tx = await prepareCreateLaunch({
@@ -184,9 +184,8 @@ describe("create_launch", () => {
     expect(ix.accounts![11]).toMatchObject({ address: RALLY_SOLANA_PROTOCOL_PROGRAM_ID, role: AccountRole.READONLY }); // preset None
   });
 
-  it("rejects a mint that sorts above its quote, before anything is pinned or paid", async () => {
-    await expect(
-      prepareCreateLaunch({
+  it("accepts a mint that sorts above its quote", async () => {
+    const tx = await prepareCreateLaunch({
         creator: addr(40),
         mint: addr(0xff),
         quoteMint: WSOL_MINT,
@@ -194,8 +193,8 @@ describe("create_launch", () => {
         name: "A",
         symbol: "A",
         metadataUri: "https://x.test/a.json",
-      }),
-    ).rejects.toMatchObject({ code: "MINT_MUST_SORT_BELOW_QUOTE" });
+    });
+    expect(last(tx.instructions).accounts![6]!.address).toBe(addr(0xff));
   });
 
   it("validates name, symbol and URI against the program's byte limits", async () => {
@@ -233,6 +232,32 @@ describe("open_pool", () => {
     // the first-buy token ATA is created first
     expect(tx.instructions[0]!.programAddress).toBe(ASSOCIATED_TOKEN_PROGRAM_ADDRESS);
     expect(tx.signers).toEqual([creator]);
+  });
+
+  it("uses canonical pool mints and mirrored tick arrays when quote is token0", async () => {
+    const reversedMint = addr(5);
+    const reversedQuote = addr(1);
+    const reversed = launchFixture({
+      mint: reversedMint,
+      quoteMint: reversedQuote,
+      pool: ZERO,
+      creator,
+      firstBuyTokens: 5n,
+    });
+    const tx = await prepareOpenPool({
+      creator,
+      mint: reversedMint,
+      launch: reversed,
+      quoteTokenProgram: TOKEN_PROGRAM_ADDRESS,
+      maxFirstBuyQuote: 777n,
+      seedIndex: 3,
+    });
+    const ix = last(tx.instructions);
+    const pool = await raydiumPdas().pool(reversed.ammConfig, reversedQuote, reversedMint, 3);
+    expect(ix.accounts![12]!.address).toBe(pool);
+    const rem = ix.accounts!.slice(26);
+    expect(rem[3]!.address).toBe(await raydiumPdas().tickArray(pool, -3600));
+    expect(rem[4]!.address).toBe(await raydiumPdas().tickArray(pool, 7200));
   });
 
   it("requires maxFirstBuyQuote when the launch has a first buy", async () => {

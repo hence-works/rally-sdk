@@ -135,7 +135,7 @@ async function main() {
   // ── launch with a first buy: the exactness proof for quoteFirstBuy ──
   const S = 1_000_000_000_000_000n;
   const firstBuyTokens = S / 100n;
-  const fb = await quoteFirstBuy({ rpc, quoteMint: WSOL_MINT, curvePreset: 0, firstBuyTokens });
+  const fb = await quoteFirstBuy({ rpc, mint: mint.address, quoteMint: WSOL_MINT, curvePreset: 0, firstBuyTokens });
   const create = await prepareCreateLaunch({
     ...target,
     creator,

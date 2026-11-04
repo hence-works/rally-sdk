@@ -3,13 +3,13 @@ import { describe, expect, it } from "vitest";
 import { MAX_MINT_SUFFIX_LENGTH, RallyError, WSOL_MINT, grindMint, sortsBelow } from "../../src/solana";
 import { addr } from "./fixtures";
 
-describe("grindMint (I-7)", () => {
-  it("returns a keypair whose address sorts below the quote, and whose seed reproduces it", async () => {
-    const g = await grindMint(WSOL_MINT);
-    expect(sortsBelow(g.address, WSOL_MINT)).toBe(true);
+describe("grindMint", () => {
+  it("returns the first valid keypair without constraining its Raydium orientation", async () => {
+    const seed = new Uint8Array(32).fill(7);
+    const g = await grindMint(addr(0), { randomSeed: () => seed });
     expect(g.seed).toHaveLength(32);
     expect((await createKeyPairSignerFromPrivateKeyBytes(g.seed)).address).toBe(g.address);
-    expect(g.attempts).toBeGreaterThanOrEqual(1);
+    expect(g.attempts).toBe(1);
   });
   it("is deterministic given a seed source, and counts attempts", async () => {
     let n = 0;
@@ -22,11 +22,9 @@ describe("grindMint (I-7)", () => {
     n = 0;
     const b = await grindMint(quote, { randomSeed: seeds });
     expect(a.address).toBe(b.address);
-    expect(sortsBelow(a.address, quote)).toBe(true);
     expect(a.attempts).toBe(n);
   });
-  it("gives up with MINING_FAILED when nothing can sort below (all-zero quote)", async () => {
-    await expect(grindMint(addr(0), { maxAttempts: 5 })).rejects.toMatchObject({ code: "MINING_FAILED" });
+  it("validates candidate seed length", async () => {
     await expect(grindMint(addr(0), { maxAttempts: 1, randomSeed: () => new Uint8Array(3) })).rejects.toBeInstanceOf(RallyError);
   });
 });
@@ -43,7 +41,7 @@ describe("grindMint suffix", () => {
     };
   };
 
-  // A high quote makes nearly every key sort below it, so these tests pay for the suffix alone.
+  // The quote argument remains for source compatibility but no longer changes the search.
   const HIGH = addr(0xff);
 
   it("preserves randomSeed as one legacy WebCrypto seed per candidate", async () => {
@@ -63,10 +61,9 @@ describe("grindMint suffix", () => {
     expect(calls).toBe(1);
   });
 
-  it("returns a key ending in the suffix that still sorts below the quote (I-7), against wSOL", async () => {
+  it("returns a key ending in the suffix against wSOL", async () => {
     const g = await grindMint(WSOL_MINT, { suffix: "z", randomSeed: stream() });
     expect(g.address.endsWith("z")).toBe(true);
-    expect(sortsBelow(g.address, WSOL_MINT)).toBe(true);
     expect((await createKeyPairSignerFromPrivateKeyBytes(g.seed)).address).toBe(g.address);
   }, 60_000);
 
@@ -76,8 +73,7 @@ describe("grindMint suffix", () => {
     expect(a.address.endsWith("Rx")).toBe(true);
     expect(a.address).toBe(b.address);
     expect(a.attempts).toBe(b.attempts);
-    // Two base58 characters against the I-7 bound is ~58^2 x 43 keypairs: seconds locally,
-    // past vitest's 5 s default on a shared CI runner.
+    // Two base58 characters are about 58^2 keypairs: potentially seconds on shared CI.
   }, 60_000);
 
   it("is case-sensitive: base58 distinguishes a from A", async () => {
@@ -88,8 +84,9 @@ describe("grindMint suffix", () => {
     expect(lower.address).not.toBe(upper.address);
   });
 
-  it("composes with ordering: an unorderable quote exhausts instead of returning a bad mint", async () => {
-    await expect(grindMint(addr(0), { suffix: "a", maxAttempts: 300, randomSeed: stream() })).rejects.toMatchObject({ code: "MINING_FAILED" });
+  it("finds the same suffix even when the retained quote argument is the zero address", async () => {
+    const result = await grindMint(addr(0), { suffix: "a", maxAttempts: 300, randomSeed: stream() });
+    expect(result.address.endsWith("a")).toBe(true);
   });
 
   it("accepts up to five base58 characters and rejects anything longer", async () => {

@@ -87,7 +87,8 @@ who cannot patch it.
 - Addresses are case-sensitive base58: use `normalizeAddress("svm", ...)`, never `toLowerCase()`.
 - `minOut` is required and rejected below 1; the swap deadline comes from the cluster's
   Clock sysvar, never `Date.now()`. Do not add defaults for either.
-- The mint must sort below the quote (I-7); `prepareCreateLaunch` re-checks it.
+- The program supports either canonical Raydium mint orientation. Derive it with the
+  shared Solana orientation adapter; never assume the launch token is token0.
 - **Quote math (`clmm.ts`, `clmm-swap.ts`, `curve.ts`, `quote.ts`) is a bit-for-bit port**, not a
   model. `clmm.ts` is Raydium's tick, liquidity and `compute_swap` math; `clmm-swap.ts` replays
   `swap_internal` (exact-input, static fee) over decoded `PoolState` / `TickArrayState`; `curve.ts`

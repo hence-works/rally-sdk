@@ -1,7 +1,6 @@
 import { AccountRole, isOffCurveAddress, type AccountMeta, type Address, type Instruction } from "@solana/kit";
 import { RallyError } from "../errors";
 import { fetchClusterTime, fetchFeeBeneficiary, fetchLaunch, fetchPoolSlot0, fetchQuoteConfig, type FeeBeneficiaryRpc, type SolanaRpc } from "./accounts";
-import { sortsBelow } from "./address";
 import { camel, encodeArgs } from "./codec";
 import {
   ASSOCIATED_TOKEN_PROGRAM_ADDRESS,
@@ -15,6 +14,7 @@ import {
 import { SOLANA_DEPLOYMENTS } from "./deployments.generated";
 import { RALLY_SOLANA_PROTOCOL_IDL } from "./idl.generated";
 import { findAssociatedTokenAddress, rallyPdas, raydiumPdas, tickArrayStart } from "./pda";
+import { poolOrientation } from "./orientation";
 import { applySlippage, applySlippageExactOut, type SolanaSwapQuote } from "./quote";
 import type { AddressOrSigner, CurveSegment, FeeConfig, LaunchAccount } from "./types";
 
@@ -280,20 +280,14 @@ export interface PrepareCreateLaunchParams extends SolanaTarget, Reads {
  * them. Splitting is safe: until `open_pool` lands there is no pool, and a pool squatted
  * on the default seed is sidestepped with another `seedIndex`.
  *
- * Enforces I-7 locally: a mint that sorts above its quote could never open its pool, and
- * by then the fee is paid and metadata pinned.
+ * Both canonical Raydium mint orientations are supported. The address can therefore be
+ * selected directly or ground only for a vanity suffix before metadata is pinned.
  */
 export async function prepareCreateLaunch(p: PrepareCreateLaunchParams): Promise<PreparedSolanaTransaction> {
   const ctx = resolveTarget(p);
   const mint = addrOf(p.mint);
   const creator = addrOf(p.creator);
-  if (!sortsBelow(mint, p.quoteMint)) {
-    throw new RallyError(
-      "MINT_MUST_SORT_BELOW_QUOTE",
-      `Mint ${mint} must sort below the quote ${p.quoteMint} (I-7). Grind one with grindMint(quoteMint).`,
-      { details: { mint, quoteMint: p.quoteMint } },
-    );
-  }
+  poolOrientation(mint, p.quoteMint);
   if (!p.name || utf8Len(p.name) > MAX_NAME) {
     throw new RallyError("INVALID_AMOUNT", `name must be 1..${MAX_NAME} bytes`);
   }
@@ -401,6 +395,7 @@ export async function prepareOpenPool(p: PrepareOpenPoolParams): Promise<Prepare
   const maxFirstBuyQuote = u64(p.maxFirstBuyQuote ?? 0n, "maxFirstBuyQuote", { positive: false });
   const seedIndex = p.seedIndex ?? DEFAULT_POOL_SEED_INDEX;
   const quoteMint = launch.quoteMint;
+  const orientation = poolOrientation(p.mint, quoteMint);
   const qp = await quoteProgramFor(quoteMint, p.quoteTokenProgram, p.rpc, ctx);
   const pdas = rallyPdas(ctx.programId);
   const ray = raydiumPdas(ctx.clmm);
@@ -408,7 +403,7 @@ export async function prepareOpenPool(p: PrepareOpenPoolParams): Promise<Prepare
 
   const launchPda = await pdas.launch(p.mint);
   const authority = await pdas.authority(launchPda);
-  const pool = await ray.pool(launch.ammConfig, p.mint, quoteMint, seedIndex);
+  const pool = await ray.pool(launch.ammConfig, orientation.mint0, orientation.mint1, seedIndex);
   const creatorToken = p.creatorTokenAccount ?? (await findAssociatedTokenAddress(creator, p.mint, TOKEN_2022_PROGRAM_ADDRESS));
   const creatorQuote = p.creatorQuoteAccount ?? (await findAssociatedTokenAddress(creator, quoteMint, qp));
 
@@ -416,13 +411,14 @@ export async function prepareOpenPool(p: PrepareOpenPoolParams): Promise<Prepare
   const remaining: Address[] = [];
   for (let i = 0; i < launch.numPositions; i++) {
     const pos = launch.positions[i]!;
+    const [rayLower, rayUpper] = orientation.raydiumRange(pos.tickLower, pos.tickUpper);
     const nft = await pdas.positionNft(launchPda, i);
     remaining.push(
       nft,
       await findAssociatedTokenAddress(authority, nft, TOKEN_2022_PROGRAM_ADDRESS),
       await ray.personalPosition(nft),
-      await ray.tickArray(pool, tickArrayStart(pos.tickLower)),
-      await ray.tickArray(pool, tickArrayStart(pos.tickUpper)),
+      await ray.tickArray(pool, tickArrayStart(rayLower)),
+      await ray.tickArray(pool, tickArrayStart(rayUpper)),
     );
   }
 
@@ -549,6 +545,7 @@ async function prepareSwap(side: "buy" | "sell", p: PrepareSwapParams, exactOutp
     throw new RallyError("INVALID_AMOUNT", "The supplied quote is for a different pool than this launch's");
   }
   const quoteMint = launch.quoteMint;
+  const orientation = poolOrientation(p.mint, quoteMint);
   const qp = await quoteProgramFor(quoteMint, p.quoteTokenProgram, p.rpc, ctx);
 
   let deadline = p.deadline;
@@ -576,12 +573,19 @@ async function prepareSwap(side: "buy" | "sell", p: PrepareSwapParams, exactOutp
   // the launch's own positions, as in the reference client: a position another party opened in
   // an array this list lacks is not accounted for, which is the reason to pass a quote.
   const buy = side === "buy";
+  const zeroForOne = orientation.zeroForOne(side);
   let remaining: Address[];
   if (p.quote) {
     remaining = [await ray.bitmap(launch.pool), ...p.quote.tickArrays];
   } else {
-    const owned = launch.positions.slice(0, launch.numPositions).map((x) => ({ lo: x.tickLower, hi: x.tickUpper }));
-    if (launch.support.nftMint !== UNSET_POOL) owned.push({ lo: launch.support.tickLower, hi: launch.support.tickUpper });
+    const owned = launch.positions.slice(0, launch.numPositions).map((x) => {
+      const [lo, hi] = orientation.raydiumRange(x.tickLower, x.tickUpper);
+      return { lo, hi };
+    });
+    if (launch.support.nftMint !== UNSET_POOL) {
+      const [lo, hi] = orientation.raydiumRange(launch.support.tickLower, launch.support.tickUpper);
+      owned.push({ lo, hi });
+    }
     const starts = new Set<number>();
     for (const o of owned) {
       starts.add(tickArrayStart(o.lo));
@@ -589,7 +593,9 @@ async function prepareSwap(side: "buy" | "sell", p: PrepareSwapParams, exactOutp
     }
     const tick = p.currentTick ?? (await fetchPoolSlot0(need(p.rpc, "`currentTick`"), launch.pool, ctx.clmm)).tick;
     const cur = tickArrayStart(tick);
-    const crossed = [...starts].filter((s) => (buy ? s >= cur : s <= cur)).sort((a, b) => (buy ? a - b : b - a));
+    const crossed = [...starts]
+      .filter((s) => zeroForOne ? s <= cur : s >= cur)
+      .sort((a, b) => zeroForOne ? b - a : a - b);
     remaining = [await ray.bitmap(launch.pool), ...(await Promise.all(crossed.map((s) => ray.tickArray(launch.pool, s))))];
   }
 
@@ -842,6 +848,8 @@ export async function prepareCollectFees(p: PrepareCollectFeesParams): Promise<P
   const pos = support ? launch.support : launch.positions[p.index]!;
   if (pos.nftMint === UNSET_POOL) throw new RallyError("INVALID_AMOUNT", "That position slot is empty");
   const quoteMint = launch.quoteMint;
+  const orientation = poolOrientation(p.mint, quoteMint);
+  const [rayLower, rayUpper] = orientation.raydiumRange(pos.tickLower, pos.tickUpper);
   const qp = await quoteProgramFor(quoteMint, p.quoteTokenProgram, p.rpc, ctx);
   const pdas = rallyPdas(ctx.programId);
   const ray = raydiumPdas(ctx.clmm);
@@ -866,8 +874,8 @@ export async function prepareCollectFees(p: PrepareCollectFeesParams): Promise<P
       poolQuoteVault: await ray.poolVault(launch.pool, quoteMint),
       personalPosition: await ray.personalPosition(pos.nftMint),
       nftAccount: await findAssociatedTokenAddress(authority, pos.nftMint, TOKEN_2022_PROGRAM_ADDRESS),
-      tickArrayLower: await ray.tickArray(launch.pool, tickArrayStart(pos.tickLower)),
-      tickArrayUpper: await ray.tickArray(launch.pool, tickArrayStart(pos.tickUpper)),
+      tickArrayLower: await ray.tickArray(launch.pool, tickArrayStart(rayLower)),
+      tickArrayUpper: await ray.tickArray(launch.pool, tickArrayStart(rayUpper)),
       tickArrayBitmap: await ray.bitmap(launch.pool),
       quoteTokenProgram: qp,
       eventAuthority: await pdas.eventAuthority(),

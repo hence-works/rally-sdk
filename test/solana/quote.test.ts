@@ -8,14 +8,17 @@ import {
   prepareBuy,
   prepareSell,
   quoteBuySolana,
+  quoteExactOutFromState,
   quoteSellSolana,
+  quoteSwapFromState,
   raydiumPdas,
   routerFeeBpsAt,
 } from "../../src/solana";
-import { MAX_SQRT_PRICE_X64, MIN_SQRT_PRICE_X64 } from "../../src/solana/clmm";
+import { MAX_SQRT_PRICE_X64, MIN_SQRT_PRICE_X64, getSqrtPriceAtTick } from "../../src/solana/clmm";
 import { decodeClmmPool, decodeClmmTickArray, simulateExactIn, TICK_ARRAY_ACCOUNT_LEN } from "../../src/solana/clmm-swap";
 import { getAddressDecoder } from "@solana/kit";
 import { MINT, accountsOf, fx, rpcFor } from "./golden/load";
+import { addr, launchFixture } from "./fixtures";
 
 const dec = getAddressDecoder();
 const toAddr = (b: Uint8Array) => dec.decode(b);
@@ -122,6 +125,64 @@ describe("quote result shape (recorded pool, no network)", () => {
       const late = await run({ rpc: rpcFor("moved"), mint: MINT, amountIn, timestamp: TS });
       expect(late.amountOut >= early.amountOut).toBe(true);
     }
+  });
+});
+
+describe("quote-token0 pools", () => {
+  const mint = addr(5);
+  const quoteMint = addr(1);
+  const pool = addr(9);
+  const launch = launchFixture({ mint, quoteMint, pool, phase: "Breakout" });
+  const liquidity = 1_000_000_000_000n;
+  const tickArray = {
+    poolId: pool,
+    startTickIndex: 0,
+    ticks: Array.from({ length: 60 }, (_, i) => ({
+      tick: i * 60,
+      liquidityNet: i === 0 ? liquidity : 0n,
+      liquidityGross: i === 0 ? liquidity : 0n,
+      hasLimitOrders: false,
+    })),
+  };
+  const poolState = {
+    ammConfig: launch.ammConfig,
+    mint0: quoteMint,
+    mint1: mint,
+    vault0: addr(10),
+    vault1: addr(11),
+    tickSpacing: 60,
+    liquidity,
+    sqrtPriceX64: getSqrtPriceAtTick(60),
+    tickCurrent: 60,
+    status: 0,
+    feeOn: 1,
+    tickArrayBitmap: 1n << 512n,
+    hasDynamicFee: false,
+  };
+  const base = {
+    side: "buy" as const,
+    mint,
+    pool,
+    launch,
+    poolState,
+    tradeFeeRate: 2500n,
+    getTickArray: (start: number) => start === 0 ? tickArray : undefined,
+    timestamp: 1n,
+  };
+
+  it("quotes exact-input buys downward in raw Raydium coordinates while charging quote fees", () => {
+    const result = quoteSwapFromState({ ...base, amountIn: 1_000_000n });
+    expect(result.amountOut).toBeGreaterThan(0n);
+    expect(result.fees.poolFee).toBeGreaterThan(0n);
+    expect(result.endSqrtPriceX64).toBeLessThan(result.startSqrtPriceX64);
+    expect(result.endTick).toBeLessThan(result.startTick);
+  });
+
+  it("quotes exact-output buys with the same reversed direction", () => {
+    const result = quoteExactOutFromState({ ...base, amountOut: 100_000n });
+    expect(result.exactOutput).toBe(true);
+    expect(result.amountOut).toBe(100_000n);
+    expect(result.endSqrtPriceX64).toBeLessThan(result.startSqrtPriceX64);
   });
 });
 

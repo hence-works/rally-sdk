@@ -1,13 +1,11 @@
 import { createKeyPairSignerFromPrivateKeyBytes, type Address, type KeyPairSigner } from "@solana/kit";
 import { RallyError } from "../errors";
-import { addressBytes, sortsBelow } from "./address";
 import { instantiateMintWasm, mineMintSuffixWasm, type MintWasmExports } from "./mint-wasm";
 
 export interface GrindMintOptions {
   /**
-   * Give up after this many keypairs. Default 100_000 (about 40 are needed against wSOL, whose
-   * first byte is 0x06). With a `suffix`, six times the expected search, which succeeds about
-   * 99.7% of the time: `6 * 58^length / P(a key sorts below the quote)`.
+   * Give up after this many keypairs. Default 1 without a suffix. With a `suffix`, six times
+   * the expected search, which succeeds about 99.7% of the time: `6 * 58^length`.
    */
   maxAttempts?: number;
   /** Seed source, 32 bytes per call. Defaults to `crypto.getRandomValues`; injectable for tests. */
@@ -18,13 +16,10 @@ export interface GrindMintOptions {
   extractable?: boolean;
   /**
    * Make the base58 address END with these characters (case-sensitive, 1 to 5 characters of the
-   * base58 alphabet). Each character costs about 58x more attempts, multiplied by the ordering
-   * rule's own cost (about 39x against wSOL, whose first byte is 0x06; a quote that sorts higher
-   * costs less). Suffix searches use the embedded Rust/WASM engine and fall back to WebCrypto
-   * when WebAssembly cannot instantiate. Run long searches in a Worker, pass `signal` to cancel,
-   * and use `onProgress` to show progress. A SUFFIX (never a prefix) keeps
-   * this compatible with I-7: ordering is decided by the high bytes of the key, the suffix by
-   * the low ones, so the two costs multiply rather than conflict.
+   * base58 alphabet). Each character costs about 58x more attempts. Suffix searches use the
+   * embedded Rust/WASM engine and fall back to WebCrypto when WebAssembly cannot instantiate.
+   * Run long searches in a Worker, pass `signal` to cancel,
+   * and use `onProgress` to show progress.
    */
   suffix?: string;
   /** Cancels the search; rejects with `MINING_FAILED`. */
@@ -55,17 +50,17 @@ export interface GroundMint {
 }
 
 /**
- * Grind a mint keypair whose key bytes sort strictly BELOW `quoteMint` (I-7). Raydium
- * orders a pool's mints by key bytes and the curve needs the launch token as token_0, so a
- * mint sorting above its quote can never open its pool. Do this BEFORE pinning metadata at
- * `/<chainId>/<mint>.json`: the address is fixed by the keypair.
+ * Generate a mint keypair, optionally grinding a vanity suffix. `quoteMint` is retained for
+ * source compatibility with the original token0-only API but no longer constrains the result:
+ * the protocol supports either canonical Raydium mint orientation. Do this BEFORE pinning
+ * metadata at `/<chainId>/<mint>.json`: the address is fixed by the keypair.
  *
  * With `suffix`, also grinds the base58 tail of the address using an embedded Rust/WASM engine.
  * The result is independently reconstructed and checked before its signer is returned. A runtime
  * without WebAssembly safely falls back to the plain WebCrypto keypair loop.
  */
 async function grindMintWebCrypto(
-  quoteMint: Address,
+  _quoteMint: Address,
   suffix: string | undefined,
   max: number,
   opts: GrindMintOptions,
@@ -77,12 +72,10 @@ async function grindMintWebCrypto(
     if (seed.length !== 32) throw new RallyError("MINING_FAILED", "randomSeed must return 32 bytes");
     const signer = await createKeyPairSignerFromPrivateKeyBytes(seed, opts.extractable ?? false);
     if (opts.signal?.aborted) throw new RallyError("MINING_FAILED", "Mint grinding was cancelled", { details: { attempts: attempts - 1 } });
-    if (suffix === undefined || signer.address.endsWith(suffix)) {
-      if (sortsBelow(signer.address, quoteMint)) return { signer, address: signer.address, seed, attempts };
-    }
+    if (suffix === undefined || signer.address.endsWith(suffix)) return { signer, address: signer.address, seed, attempts };
     if (opts.onProgress && attempts % 1000 === 0) opts.onProgress(attempts);
   }
-  throw exhausted(quoteMint, suffix, max);
+  throw exhausted(_quoteMint, suffix, max);
 }
 
 async function grindMintWebCryptoSuffix(
@@ -121,7 +114,7 @@ async function grindMintWebCryptoSuffix(
         if (opts.signal?.aborted) {
           throw new RallyError("MINING_FAILED", "Mint grinding was cancelled", { details: { attempts: attempts - 1 } });
         }
-        if (signer.address.endsWith(suffix) && sortsBelow(signer.address, quoteMint)) {
+        if (signer.address.endsWith(suffix)) {
           keepSeed = true;
           return { signer, address: signer.address, seed, attempts, nonce };
         }
@@ -139,7 +132,7 @@ async function grindMintWebCryptoSuffix(
 function exhausted(quoteMint: Address, suffix: string | undefined, max: number): RallyError {
   return new RallyError(
     "MINING_FAILED",
-    `No mint ${suffix ? `ending in "${suffix}" and ` : ""}sorting below ${quoteMint} found in ${max} attempts`,
+    `No mint ${suffix ? `ending in "${suffix}" ` : ""}found in ${max} attempts`,
     { details: { quoteMint, attempts: max, ...(suffix ? { suffix } : {}) } },
   );
 }
@@ -160,10 +153,7 @@ export async function grindMintWithWasmFallback(
       );
     }
   }
-  // Expected attempts = 58^len / P(below quote); P is estimated from the quote's first four bytes.
-  const quoteHigh = new DataView(addressBytes(quoteMint).buffer).getUint32(0, false);
-  const max =
-    opts.maxAttempts ?? (suffix ? Math.ceil((6 * 58 ** suffix.length * 2 ** 32) / Math.max(1, quoteHigh)) : 100_000);
+  const max = opts.maxAttempts ?? (suffix ? Math.ceil(6 * 58 ** suffix.length) : 1);
   if (!Number.isSafeInteger(max) || max < 1) {
     throw new RallyError("MINING_FAILED", "maxAttempts must be a positive safe integer");
   }
@@ -183,18 +173,13 @@ export async function grindMintWithWasmFallback(
   if (masterSeed.length !== 32) throw new RallyError("MINING_FAILED", "masterSeed must contain 32 bytes");
   if (!masterSeed.some((byte) => byte !== 0)) throw new RallyError("MINING_FAILED", "masterSeed must not be all zeroes");
   try {
-    // No public key can sort strictly below the zero address. Keep this synthetic/test boundary
-    // on the parity fallback because the WASM module rejects an unsearchable zero quote at setup.
-    if (!addressBytes(quoteMint).some((byte) => byte !== 0)) {
-      return await grindMintWebCryptoSuffix(quoteMint, suffix, masterSeed, max, opts);
-    }
     let wasm: MintWasmExports;
     try {
       wasm = await instantiate();
     } catch {
       return grindMintWebCryptoSuffix(quoteMint, suffix, masterSeed, max, opts);
     }
-    return await mineMintSuffixWasm(quoteMint, suffix, {
+    return await mineMintSuffixWasm(suffix, {
       masterSeed,
       maxAttempts: max,
       startNonce: opts.startNonce,

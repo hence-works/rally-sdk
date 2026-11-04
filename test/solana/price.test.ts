@@ -31,6 +31,10 @@ describe("priceWadFromSqrtPriceX64", () => {
     const expected = (sqrt * sqrt * 10n ** 15n) / (1n << 128n);
     expect(priceWadFromSqrtPriceX64(sqrt, 9)).toBe(expected);
   });
+  it("normalizes a quote-token0 pool back to quote per launch token", () => {
+    expect(priceWadFromSqrtPriceX64(2n * Q64, 6, true)).toBe(250_000_000_000_000_000n);
+    expect(priceWadFromSqrtPriceX64(Q64 / 2n, 6, true)).toBe(4n * 10n ** 18n);
+  });
   it("zero price is zero", () => {
     expect(priceWadFromSqrtPriceX64(0n, 9)).toBe(0n);
   });

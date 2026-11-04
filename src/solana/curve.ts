@@ -14,6 +14,7 @@ import {
   U64_MAX,
   U128_MAX,
   amount0Delta,
+  amount1Delta,
   amountsForLiquidity,
   getSqrtPriceAtTick,
   getTickAtSqrtPrice,
@@ -328,6 +329,67 @@ export function planFirstBuy(
     const t0 = amountsForLiquidity(sqrtStart, lo, hi, p.liquidity, false).amount0;
     bought += t0 > at.amount0 ? t0 - at.amount0 : 0n;
     quoteNeeded += at.amount1;
+  }
+  if (quoteNeeded > U64_MAX) throw bad("First buy cost overflows u64");
+  if (bought > firstBuyTokens) bought = firstBuyTokens;
+  return { tokensOut: bought, quoteCost: quoteNeeded, sqrtPriceOpenX64: sqrtOpen, sqrtPriceStartX64: sqrtStart };
+}
+
+/**
+ * `planFirstBuy` in canonical Raydium coordinates. Rally stores every position and boundary
+ * as economic quote-per-token ticks; a quote-token0 pool mirrors the raw tick range and walks
+ * downward using token1 deltas. This follows the program directly instead of taking a rounded
+ * reciprocal of the legacy opening sqrt price.
+ */
+export function planFirstBuyForOrientation(
+  positions: readonly PlannedPosition[],
+  tickLower: number,
+  tickUpper: number,
+  firstBuyTokens: bigint,
+  quoteIsToken0: boolean,
+): FirstBuyPlan {
+  if (!quoteIsToken0) return planFirstBuy(positions, tickLower, tickUpper, firstBuyTokens);
+
+  const sqrtStart = getSqrtPriceAtTick(-tickLower);
+  let sqrtOpen = sqrtStart;
+  if (firstBuyTokens > 0n) {
+    const ticks = [...new Set(positions.flatMap((p) => [p.tickLower, p.tickUpper]).filter((t) => t > tickLower))].sort((a, b) => a - b);
+    let remaining = firstBuyTokens;
+    let currentTick = tickLower;
+    let found = false;
+    for (const nextEconomicTick of ticks) {
+      const liquidity = depthAt(positions, currentTick);
+      const next = getSqrtPriceAtTick(-nextEconomicTick);
+      if (liquidity > 0n) {
+        const available = amount1Delta(next, sqrtOpen, liquidity, false);
+        if (remaining <= available) {
+          const numerator = remaining * Q64;
+          const delta = (numerator + liquidity - 1n) / liquidity;
+          sqrtOpen = sqrtOpen - delta;
+          if (sqrtOpen < next) sqrtOpen = next;
+          found = true;
+          break;
+        }
+        remaining -= available;
+      }
+      sqrtOpen = next;
+      currentTick = nextEconomicTick;
+    }
+    if (!found) throw bad("The first buy is larger than the curve can sell (FirstBuyTooLarge)");
+  }
+
+  if (!(sqrtOpen > getSqrtPriceAtTick(-tickUpper))) {
+    throw new RallyError("INVALID_AMOUNT", "The first buy would graduate the curve (FirstBuyTooLarge)");
+  }
+  let quoteNeeded = 0n;
+  let bought = 0n;
+  for (const p of positions) {
+    const lo = getSqrtPriceAtTick(-p.tickUpper);
+    const hi = getSqrtPriceAtTick(-p.tickLower);
+    const at = amountsForLiquidity(sqrtOpen, lo, hi, p.liquidity, true);
+    const atStart = amountsForLiquidity(sqrtStart, lo, hi, p.liquidity, false);
+    bought += atStart.amount1 > at.amount1 ? atStart.amount1 - at.amount1 : 0n;
+    quoteNeeded += at.amount0;
   }
   if (quoteNeeded > U64_MAX) throw bad("First buy cost overflows u64");
   if (bought > firstBuyTokens) bought = firstBuyTokens;

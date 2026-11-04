@@ -3,7 +3,7 @@ import vectors from "./golden/vectors/rust-vectors.json";
 import { getSqrtPriceAtTick, amountsForLiquidity } from "../../src/solana/clmm";
 import { alignTick, buildCurve, curveTicks, planFirstBuy, presetSegments, sqrtPriceAfterBuy } from "../../src/solana/curve";
 import { quoteFirstBuy } from "../../src/solana";
-import { launchFixture } from "./fixtures";
+import { addr, launchFixture } from "./fixtures";
 
 const S = 1_000_000_000_000_000n; // 1e9 tokens at 6dp
 const B: Record<string, bigint> = { sol: 85_000_000_000n, usdc: 15_000_000_000n };
@@ -87,7 +87,7 @@ describe("planFirstBuy", () => {
 });
 
 describe("quoteFirstBuy", () => {
-  const cfg = { totalSupply: S, curveAllocationBps: 8000, tailBps: 10_000, firstBuySupplyCapBps: 200, gradThreshold: 85_000_000_000n };
+  const cfg = { mint: addr(1), quoteMint: addr(3), totalSupply: S, curveAllocationBps: 8000, tailBps: 10_000, firstBuySupplyCapBps: 200, gradThreshold: 85_000_000_000n };
 
   it("quotes before create_launch from the preset and the governed parameters", async () => {
     const q = await quoteFirstBuy({ ...cfg, curvePreset: 0, firstBuyTokens: S / 100n });
@@ -114,6 +114,36 @@ describe("quoteFirstBuy", () => {
     const a = await quoteFirstBuy({ launch });
     const b = await quoteFirstBuy({ ...cfg, firstBuyTokens: S / 100n });
     expect([a.quoteCost, a.tokensOut, a.sqrtPriceOpenX64]).toEqual([b.quoteCost, b.tokensOut, b.sqrtPriceOpenX64]);
+  });
+
+  it("walks the mirrored raw curve when quote is token0", async () => {
+    const mint = addr(5);
+    const quoteMint = addr(1);
+    const q = await quoteFirstBuy({ ...cfg, mint, quoteMint, firstBuyTokens: S / 100n });
+    expect(q.sqrtPriceOpenX64).toBeLessThan(q.sqrtPriceStartX64);
+    expect(q.quoteCost).toBeGreaterThan(0n);
+
+    const launch = launchFixture({
+      mint,
+      quoteMint,
+      phase: "Created",
+      pool: "11111111111111111111111111111111" as never,
+      tickLower: q.tickLower,
+      tickUpper: q.tickUpper,
+      numPositions: q.positions.length,
+      positions: [
+        ...q.positions.map((p) => ({ nftMint: "11111111111111111111111111111111" as never, tickLower: p.tickLower, tickUpper: p.tickUpper, liquidity: p.liquidity, feeNftMint: "11111111111111111111111111111111" as never })),
+        ...Array.from({ length: 6 - q.positions.length }, () => ({ nftMint: "11111111111111111111111111111111" as never, tickLower: 0, tickUpper: 0, liquidity: 0n, feeNftMint: "11111111111111111111111111111111" as never })),
+      ],
+      firstBuyTokens: S / 100n,
+    });
+    const fromLaunch = await quoteFirstBuy({ launch });
+    expect(fromLaunch).toMatchObject({
+      quoteCost: q.quoteCost,
+      tokensOut: q.tokensOut,
+      sqrtPriceOpenX64: q.sqrtPriceOpenX64,
+      sqrtPriceStartX64: q.sqrtPriceStartX64,
+    });
   });
 
   it("enforces the governed first-buy cap when it is known", async () => {

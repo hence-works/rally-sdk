@@ -565,15 +565,15 @@ import { createSolanaRpc } from "@solana/kit";
 
 const rpc = createSolanaRpc("https://api.devnet.solana.com");
 
-// 1. Grind a mint that sorts below the quote (I-7), THEN pin metadata at /7565165/<mint>.json.
-//    Optionally pin the address's last characters too (case-sensitive base58, at most 5).
+// 1. Generate a mint, THEN pin metadata at /7565165/<mint>.json.
+//    Optionally grind the address's last characters too (case-sensitive base58, at most 5).
 const mint = await grindMint(WSOL_MINT /*, { suffix: "fun" } */);
 
 // 2. Two transactions: they do not fit in one (1,644 bytes vs the 1,232 limit, even with the
 //    lookup table). Send them back to back, ideally as a Jito bundle. A launch is
 //    tradeable only after the second lands.
 //    The creator's first buy is priced BEFORE either exists, exactly:
-const firstBuy = await quoteFirstBuy({ rpc, quoteMint: WSOL_MINT, firstBuyTokens });
+const firstBuy = await quoteFirstBuy({ rpc, mint: mint.address, quoteMint: WSOL_MINT, firstBuyTokens });
 const create = await prepareCreateLaunch({ chainId: SOLANA_DEVNET_CHAIN_ID, rpc, creator, mint: mint.signer,
   quoteMint: WSOL_MINT, name, symbol, metadataUri, firstBuyTokens });
 const open = await prepareOpenPool({ chainId: SOLANA_DEVNET_CHAIN_ID, rpc, creator, mint: mint.address,
@@ -599,7 +599,9 @@ Every write is a `prepare*` returning `{ instructions, signers, lookupTable? }`:
 or sends. Amounts are `bigint` base units (launch tokens are **6dp** on Solana; read the
 quote's decimals from `fetchQuoteConfig`). A buy with a wSOL quote spends wrapped SOL, so
 wrap into `traderQuoteAccount` first; the SDK does not. `priceWadFromSqrtPriceX64(sqrt,
-quoteDecimals)` turns a Raydium pool's price into a WAD. Solana chain ids are Envio's
+quoteDecimals, quoteIsToken0)` turns a Raydium pool's raw price into a WAD; decoded launches
+let `fetchLaunchPriceWad` derive the orientation automatically from their required `mint` and
+`quoteMint` fields; the helper fails closed rather than guessing from a pool address alone. Solana chain ids are Envio's
 (`7565164` mainnet, `7565165` devnet); `normalizeAddress("svm", key)` validates a key
 without touching its case.
 
@@ -608,7 +610,8 @@ without touching its case.
 `quoteBuySolana` / `quoteSellSolana` replay Raydium's CLMM swap in integer math, rounding exactly
 as the pool does, over the pool's **real** tick arrays (read in one batched call, more on demand),
 so liquidity other LPs added to the pool is priced in. They apply the pool fee (charged in the
-quote on both sides, `collect_fee_on = Token1Only`) and the router's anti-snipe fee at the
+quote on both sides, using `Token0Only` or `Token1Only` according to canonical mint order) and
+the router's anti-snipe fee at the
 cluster's clock (zero after breakout). The result carries `amountOut`, `fees`, `priceImpactBps`,
 `startSqrtPriceX64` / `endSqrtPriceX64`, `startTick` / `endTick`, and the `tickArrays` the swap
 crosses, which `prepareBuy` / `prepareSell` send as the swap's remaining accounts when you pass the
@@ -622,7 +625,7 @@ quote. `slippageBps` is yours to choose; with it the quote also returns `minOut`
   would cross more than `maxTickArrays` (default 12). `INSUFFICIENT_LIQUIDITY` means the program
   itself would revert the swap. Amounts that round to nothing throw `INVALID_AMOUNT`, as the pool
   would.
-- `quoteFirstBuy({ rpc, quoteMint, firstBuyTokens })` prices the creator's fee-exempt first buy
+- `quoteFirstBuy({ rpc, mint, quoteMint, firstBuyTokens })` prices the creator's fee-exempt first buy
   from the governed curve parameters and the quote's `B`, before `create_launch` exists. Its
   `maxFirstBuyQuote` is exactly what `open_pool` charges: that value is accepted, one unit less
   reverts. `quoteSwapFromState` is the pure core, for callers that already hold the accounts.
@@ -683,8 +686,9 @@ refresh the validator fixtures to check SDK exact-output quotes against actual f
 `maxIn` equal to the quote and one unit below it, before treating that parity as verified.
 
 `grindMint(quote, { suffix })` pins the last 1 to 5 base58 characters (case-sensitive) of the mint
-address while keeping it below the quote (I-7). Each character costs about 58x, on top of the
-ordering rule (about 39x against wSOL). Suffix searches use the embedded Rust/WASM ed25519 miner and
+address. The retained `quote` argument is source-compatible and no longer constrains the address,
+because the protocol supports either canonical Raydium mint orientation. Each character costs
+about 58x. Suffix searches use the embedded Rust/WASM ed25519 miner and
 independently reconstruct its returned keypair before use. If WebAssembly cannot instantiate, the
 same call falls back to WebCrypto. The default limit is six times the expected attempts, so long
 suffixes still need worker sharding or durable execution in practice. Workers sharing the same

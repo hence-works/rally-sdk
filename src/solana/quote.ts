@@ -14,11 +14,7 @@
 import { getAddressDecoder, type Address, type GetMultipleAccountsApi, type Rpc } from "@solana/kit";
 import { RallyError } from "../errors";
 import { fetchClusterTime, fetchConfig, fetchLaunch, fetchQuoteConfig, type SolanaRpc } from "./accounts";
-import {
-  MAX_SQRT_PRICE_X64,
-  MIN_SQRT_PRICE_X64,
-  Q128,
-} from "./clmm";
+import { Q128 } from "./clmm";
 import {
   TICK_ARRAY_ACCOUNT_LEN,
   TickArrayMissing,
@@ -32,9 +28,10 @@ import {
   type ClmmTickArray,
 } from "./clmm-swap";
 import { RAYDIUM_CLMM_DEVNET, RALLY_SOLANA_PROTOCOL_PROGRAM_ID } from "./constants";
-import { buildCurve, planFirstBuy, presetSegments, type CurveLayout, type FirstBuyPlan, type PlannedPosition } from "./curve";
+import { buildCurve, planFirstBuyForOrientation, presetSegments, type CurveLayout, type FirstBuyPlan, type PlannedPosition } from "./curve";
 import { SOLANA_DEPLOYMENTS } from "./deployments.generated";
 import { raydiumPdas } from "./pda";
+import { poolOrientation } from "./orientation";
 import type { CurveSegment, LaunchAccount } from "./types";
 
 /** The slice of the kit RPC a quote reads with. Any `createSolanaRpc(...)` satisfies it. */
@@ -122,7 +119,7 @@ export interface SolanaSwapQuote {
     routerFeeBps: bigint;
     /** Router fee actually charged, in quote base units. */
     routerFee: bigint;
-    /** Raydium pool fee, in quote base units (`collect_fee_on = Token1Only`: always quote). */
+    /** Raydium pool fee, in quote base units (the pool selects its quote-token side). */
     poolFee: bigint;
     /** Raydium `trade_fee_rate` over 1_000_000. */
     poolFeeRate: bigint;
@@ -173,8 +170,12 @@ export function quoteExactOutFromState(i: QuoteExactOutStateInput): Omit<SolanaS
 export function quoteSwapFromState(i: QuoteStateInput): Omit<SolanaSwapQuote, "tickArrays"> {
   const { launch, poolState } = i;
   const buy = i.side === "buy";
-  if (poolState.mint0 !== launch.mint || poolState.mint1 !== launch.quoteMint) {
+  const orientation = poolOrientation(launch.mint, launch.quoteMint);
+  if (poolState.mint0 !== orientation.mint0 || poolState.mint1 !== orientation.mint1) {
     throw new RallyError("INVALID_ACCOUNT_DATA", "The pool is not this launch's (mint orientation mismatch)");
+  }
+  if (poolState.feeOn !== orientation.collectFeeOn) {
+    throw new RallyError("INVALID_ACCOUNT_DATA", "The pool does not collect its trading fee in the launch quote token");
   }
   if (typeof i.amountIn !== "bigint" || !(i.amountIn > 0n && i.amountIn < 1n << 64n)) {
     throw new RallyError("INVALID_AMOUNT", `amountIn must be in 1..2^64-1: ${i.amountIn}`);
@@ -192,9 +193,9 @@ export function quoteSwapFromState(i: QuoteStateInput): Omit<SolanaSwapQuote, "t
     tradeFeeRate: i.tradeFeeRate,
     getTickArray: i.getTickArray,
     amountIn: poolIn,
-    zeroForOne: !buy,
+    zeroForOne: orientation.zeroForOne(i.side),
     // The router's own price limits (swap.rs `do_swap`).
-    sqrtPriceLimitX64: buy ? MAX_SQRT_PRICE_X64 - 1n : MIN_SQRT_PRICE_X64 + 1n,
+    sqrtPriceLimitX64: orientation.sqrtPriceLimit(i.side),
   };
   const poolOut = i.amountIn + (exactOutput && !buy ? grossUpFee(i.amountIn, feeBps) : 0n);
   if (exactOutput && poolOut >= 1n << 64n) throw new RallyError("INVALID_AMOUNT", "Gross output exceeds u64");
@@ -226,8 +227,10 @@ export function quoteSwapFromState(i: QuoteStateInput): Omit<SolanaSwapQuote, "t
   if (amountInUsed >= 1n << 64n) throw new RallyError("INVALID_AMOUNT", "Required input exceeds u64");
 
   // Price impact: average fill price vs the spot before the swap, both as quote-per-token ratios.
-  const spot = poolState.sqrtPriceX64 * poolState.sqrtPriceX64; // quote/token * 2^128
-  const exec = (spotCostQuote * Q128 * BPS) / (tokens * spot); // exec/spot in bps
+  const spotSquared = poolState.sqrtPriceX64 * poolState.sqrtPriceX64;
+  const exec = orientation.quoteIsToken0
+    ? (spotCostQuote * spotSquared * BPS) / (tokens * Q128)
+    : (spotCostQuote * Q128 * BPS) / (tokens * spotSquared);
   const impact = buy ? (exec > BPS ? exec - BPS : 0n) : exec < BPS ? BPS - exec : 0n;
 
   const quote: Omit<SolanaSwapQuote, "tickArrays"> = {
@@ -337,7 +340,8 @@ async function quoteSwap(side: "buy" | "sell", p: QuoteSwapParams, exactOutput =
   // Fetch the arrays the swap will want: the first one plus the next few initialized ones in its
   // direction, then more on demand. The replay is exact, so it asks for exactly what it crosses.
   const ray = raydiumPdas(clmm);
-  const zeroForOne = side === "sell";
+  const orientation = poolOrientation(p.mint, launch.quoteMint);
+  const zeroForOne = orientation.zeroForOne(side);
   const loaded = new Map<number, ClmmTickArray>();
   const fetchBatch = async (starts: number[]) => {
     const todo = starts.filter((s) => !loaded.has(s));
@@ -431,6 +435,8 @@ export interface QuoteFirstBuyParams {
   segments?: readonly CurveSegment[];
   /** `B`: the quote's `gradThreshold`. Read from `QuoteConfig` when omitted and `quoteMint` + `rpc` are given. */
   gradThreshold?: bigint;
+  /** Launch mint. Required before `create_launch` so the canonical Raydium orientation is known. */
+  mint?: Address;
   quoteMint?: Address;
   /** Governed parameters. Read from `Config` when omitted and `rpc` is given. */
   totalSupply?: bigint;
@@ -466,7 +472,8 @@ export async function quoteFirstBuy(p: QuoteFirstBuyParams): Promise<FirstBuyQuo
     if (l.pool !== UNSET) throw new RallyError("UNSUPPORTED", `Launch ${l.mint} already has its pool open; the first buy is done`);
     const tokens = p.firstBuyTokens ?? l.firstBuyTokens;
     const positions = l.positions.slice(0, l.numPositions).map((x) => ({ tickLower: x.tickLower, tickUpper: x.tickUpper, liquidity: x.liquidity }));
-    const plan = planFirstBuy(positions, l.tickLower, l.tickUpper, tokens);
+    const orientation = poolOrientation(l.mint, l.quoteMint);
+    const plan = planFirstBuyForOrientation(positions, l.tickLower, l.tickUpper, tokens, orientation.quoteIsToken0);
     return { ...plan, firstBuyTokens: tokens, maxFirstBuyQuote: plan.quoteCost, tickLower: l.tickLower, tickUpper: l.tickUpper, positions };
   }
 
@@ -475,6 +482,10 @@ export async function quoteFirstBuy(p: QuoteFirstBuyParams): Promise<FirstBuyQuo
     throw new RallyError("INVALID_AMOUNT", "firstBuyTokens must be a bigint in 0..2^64-1");
   }
   const segments = p.segments ?? presetSegments(p.curvePreset ?? 0);
+  if (!p.mint || !p.quoteMint) {
+    throw new RallyError("MISSING_ADDRESS", "mint and quoteMint are required to quote a first buy before create_launch");
+  }
+  const orientation = poolOrientation(p.mint, p.quoteMint);
 
   let { totalSupply, curveAllocationBps, tailBps, firstBuySupplyCapBps } = p;
   if (totalSupply === undefined || curveAllocationBps === undefined || tailBps === undefined) {
@@ -504,7 +515,7 @@ export async function quoteFirstBuy(p: QuoteFirstBuyParams): Promise<FirstBuyQuo
     });
   }
   const layout = buildCurve({ segments, totalSupply, curveAllocationBps, gradThreshold: b, tailBps });
-  const plan = planFirstBuy(layout.positions, layout.tickLower, layout.tickUpper, tokens);
+  const plan = planFirstBuyForOrientation(layout.positions, layout.tickLower, layout.tickUpper, tokens, orientation.quoteIsToken0);
   return {
     ...plan,
     firstBuyTokens: tokens,

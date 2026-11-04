@@ -16,6 +16,7 @@
 export * from "./constants";
 export * from "./types";
 export { normalizeAddress, normalizeAddressForChain, normalizeSolanaAddress, sortsBelow } from "./address";
+export { poolOrientation, type PoolOrientation, type SwapSide } from "./orientation";
 export { rallyPdas, raydiumPdas, findAssociatedTokenAddress, tickArrayStart } from "./pda";
 export { grindMint, MAX_MINT_SUFFIX_LENGTH } from "./mint";
 export type { GrindMintOptions, GroundMint } from "./mint";
@@ -42,7 +43,7 @@ export type {
   SolanaQuoteRpc,
   SolanaSwapQuote,
 } from "./quote";
-export { buildCurve, planFirstBuy, presetSegments, sqrtPriceAfterBuy } from "./curve";
+export { buildCurve, planFirstBuy, planFirstBuyForOrientation, presetSegments, sqrtPriceAfterBuy } from "./curve";
 export type { BuildCurveParams, CurveLayout, FirstBuyPlan, PlannedPosition } from "./curve";
 export { getSqrtPriceAtTick, getTickAtSqrtPrice } from "./clmm";
 export {

@@ -30,7 +30,7 @@ export function normalizeAddressForChain(chainId: number, value: string): string
   return normalizeAddress(vmOf(chainId), value);
 }
 
-/** Raw 32 key bytes, for byte-order comparisons (I-7). */
+/** Raw 32 key bytes, for canonical Solana/Raydium key ordering. */
 export function addressBytes(value: Address): Uint8Array {
   return new Uint8Array(getAddressEncoder().encode(value));
 }

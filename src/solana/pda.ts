@@ -6,6 +6,7 @@ import {
   TICK_ARRAY_SIZE,
   TICK_SPACING,
 } from "./constants";
+import { poolOrientation } from "./orientation";
 
 /**
  * PDA derivations, ported seed for seed from the reference client
@@ -64,8 +65,10 @@ export function rallyPdas(programId: Address = RALLY_SOLANA_PROTOCOL_PROGRAM_ID)
 export function raydiumPdas(clmm: Address = RAYDIUM_CLMM_DEVNET) {
   const p = (...seeds: Uint8Array[]) => derive(clmm, seeds);
   return {
-    pool: (ammConfig: Address, mint0: Address, mint1: Address, seedIndex: number) =>
-      p(te.encode("pool"), key(ammConfig), key(mint0), key(mint1), u16le(seedIndex)),
+    pool: (ammConfig: Address, mintA: Address, mintB: Address, seedIndex: number) => {
+      const { mint0, mint1 } = poolOrientation(mintA, mintB);
+      return p(te.encode("pool"), key(ammConfig), key(mint0), key(mint1), u16le(seedIndex));
+    },
     poolVault: (pool: Address, mint: Address) => p(te.encode("pool_vault"), key(pool), key(mint)),
     observation: (pool: Address) => p(te.encode("observation"), key(pool)),
     bitmap: (pool: Address) => p(te.encode("pool_tick_array_bitmap_extension"), key(pool)),

@@ -4,6 +4,7 @@ import { decodeAccount } from "./codec";
 import { CLOCK_SYSVAR_ADDRESS, RALLY_SOLANA_PROTOCOL_PROGRAM_ID, RAYDIUM_CLMM_DEVNET, TOKEN_2022_PROGRAM_ADDRESS, SYSTEM_PROGRAM_ADDRESS } from "./constants";
 import { rallyPdas } from "./pda";
 import { priceWadFromSqrtPriceX64 } from "./price";
+import { poolOrientation } from "./orientation";
 import type {
   ConfigAccount,
   LaunchAccount,
@@ -180,12 +181,16 @@ export async function fetchPoolSlot0(
  */
 export async function fetchLaunchPriceWad(
   rpc: SolanaRpc,
-  launch: Pick<LaunchAccount, "pool">,
+  launch: Pick<LaunchAccount, "pool" | "mint" | "quoteMint">,
   quoteDecimals: number,
   clmm: Address = RAYDIUM_CLMM_DEVNET,
 ): Promise<bigint> {
+  if (!launch.mint || !launch.quoteMint) {
+    throw new RallyError("MISSING_ADDRESS", "Launch mint and quote mint are required to derive the pool orientation");
+  }
+  const quoteIsToken0 = poolOrientation(launch.mint, launch.quoteMint).quoteIsToken0;
   const { sqrtPriceX64 } = await fetchPoolSlot0(rpc, launch.pool, clmm);
-  return priceWadFromSqrtPriceX64(sqrtPriceX64, quoteDecimals);
+  return priceWadFromSqrtPriceX64(sqrtPriceX64, quoteDecimals, quoteIsToken0);
 }
 
 // ── Cluster clock ────────────────────────────────────────────────────────────

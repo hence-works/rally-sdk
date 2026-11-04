@@ -44,12 +44,12 @@ describe("raydium PDAs", () => {
   const r = raydiumPdas(CLMM);
   it("match the reference client, including a negative tick array start (big-endian i32)", async () => {
     const pool = await r.pool(AMM, MINT, QUOTE, 1);
-    expect(pool).toBe("5SAum2qwHuNKEbeasyPAn5xBhDaqkHhcaghZyJCsV8Ae");
-    expect(await r.poolVault(pool, MINT)).toBe("DbyViwmqD4LafoRtijiKoESYf4yjkP8Ta4JVfNgZN2ZV");
-    expect(await r.observation(pool)).toBe("EQVKJiE1dkEsoF6mK7jAQCs8Ur3aq3RP7Y6jpqPuqb9C");
-    expect(await r.bitmap(pool)).toBe("H2nh6boc5MXpwZdprag4gCe8X37TC85dw93gwDPZzKcZ");
-    expect(await r.tickArray(pool, -7200)).toBe("9f11XKUtTEVin2gviAXwLmbWJ8Nbk1aQqhBuudLNLf8z");
-    expect(await r.tickArray(pool, 10800)).toBe("AxjEnHpHksTSQmcPB65um7VXKxwHqYrLu39Ewo5VxXG7");
+    expect(pool).toBe("3joNEohBvpPyY2hJJZeFEfB3Q8KsEbTmnqQGwZprpqwx");
+    expect(await r.poolVault(pool, MINT)).toBe("6R1r9o1dVj2NLzfUH7jfs2A6iwo4t5y9a19J52ZUU8U2");
+    expect(await r.observation(pool)).toBe("Fv8hjrSkUDfr2EDGXZStaDW6ks7Y5zVGTnEnQXtcTV1y");
+    expect(await r.bitmap(pool)).toBe("AE7YcxyxKUCXHCPn7PwC6wDcL9q2DyYB4rxN4XZRuXtG");
+    expect(await r.tickArray(pool, -7200)).toBe("DAPzLG31VgFzv91kkvoq4nGSd8eyxDsYRdhNBtaN5dpL");
+    expect(await r.tickArray(pool, 10800)).toBe("BLLdo13iyPmyCWrDu2cpQ98KQtbfiha4efDAnFyt8idr");
     const nft = await rallyPdas(PROGRAM).positionNft(await rallyPdas(PROGRAM).launch(MINT), 2);
     expect(await r.personalPosition(nft)).toBe("5Gtyp57G7JdNbjm1cEw2Ae3R5oYJKNFhQmmVD2QqzaJU");
   });

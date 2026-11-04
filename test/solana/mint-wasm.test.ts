@@ -8,9 +8,8 @@ import { addr } from "./fixtures";
 async function fixtureExports(options: { hitAfter?: number; seed?: Uint8Array } = {}) {
   const memory = new WebAssembly.Memory({ initial: 1 });
   const masterPtr = 0;
-  const quotePtr = 32;
-  const suffixPtr = 64;
-  const resultPtr = 128;
+  const suffixPtr = 32;
+  const resultPtr = 64;
   const seed = options.seed ?? new Uint8Array(32).fill(7);
   const signer = await createKeyPairSignerFromPrivateKeyBytes(seed);
   const result = new Uint8Array(memory.buffer, resultPtr, 64);
@@ -26,7 +25,6 @@ async function fixtureExports(options: { hitAfter?: number; seed?: Uint8Array } 
   const exports: MintWasmExports = {
     memory,
     master_seed_ptr: () => masterPtr,
-    quote_ptr: () => quotePtr,
     suffix_ptr: () => suffixPtr,
     result_ptr: () => resultPtr,
     configure: (length) => {
@@ -54,7 +52,7 @@ describe("Solana mint WASM adapter", () => {
       grindMintWithWasmFallback(
         addr(0),
         {
-          suffix: "7",
+          suffix: "zzzzz",
           maxAttempts: 3,
           masterSeed: new Uint8Array(32).fill(1),
         },
@@ -62,7 +60,7 @@ describe("Solana mint WASM adapter", () => {
           throw new Error("WebAssembly unavailable");
         },
       ),
-    ).rejects.toMatchObject({ code: "MINING_FAILED", details: { attempts: 3, suffix: "7" } });
+    ).rejects.toMatchObject({ code: "MINING_FAILED", details: { attempts: 3, suffix: "zzzzz" } });
 
     await expect(
       grindMintWithWasmFallback(
@@ -82,7 +80,7 @@ describe("Solana mint WASM adapter", () => {
 
   it("matches the Rust SHA-256/ed25519 vector", async () => {
     const masterSeed = new Uint8Array(32).fill(7);
-    const result = await mineMintSuffixWasm(addr(0xff), "mVd6", {
+    const result = await mineMintSuffixWasm("mVd6", {
       masterSeed,
       maxAttempts: 1,
       instantiate: instantiateMintWasm,
@@ -115,7 +113,7 @@ describe("Solana mint WASM adapter", () => {
     const expected = await createKeyPairSignerFromPrivateKeyBytes(seed);
     const suffix = expected.address.slice(-5);
 
-    const result = await mineMintSuffixWasm(addr(0xff), suffix, {
+    const result = await mineMintSuffixWasm(suffix, {
       masterSeed,
       startNonce: nonce,
       maxAttempts: 1,
@@ -128,17 +126,15 @@ describe("Solana mint WASM adapter", () => {
   it("copies inputs, reconstructs the signer, and reports the winning nonce", async () => {
     const fixture = await fixtureExports();
     const masterSeed = new Uint8Array(32).map((_, i) => i);
-    const quote = addr(0xff);
     const suffix = fixture.signer.address.slice(-1);
-    const result = await mineMintSuffixWasm(quote, suffix, {
+    const result = await mineMintSuffixWasm(suffix, {
       masterSeed,
       maxAttempts: 10,
       instantiate: async () => fixture.exports,
     });
 
     expect(new Uint8Array(fixture.exports.memory.buffer, 0, 32)).toEqual(masterSeed);
-    expect(new Uint8Array(fixture.exports.memory.buffer, 32, 32)).toEqual(addressBytes(quote));
-    expect(new TextDecoder().decode(new Uint8Array(fixture.exports.memory.buffer, 64, 1))).toBe(suffix);
+    expect(new TextDecoder().decode(new Uint8Array(fixture.exports.memory.buffer, 32, 1))).toBe(suffix);
     expect(fixture.configuredLength()).toBe(1);
     expect(result.address).toBe(fixture.signer.address);
     expect(result.seed).toEqual(new Uint8Array(32).fill(7));
@@ -149,7 +145,7 @@ describe("Solana mint WASM adapter", () => {
   it("uses disjoint deterministic shards and chunks progress", async () => {
     const fixture = await fixtureExports({ hitAfter: 9 });
     const progress: number[] = [];
-    await mineMintSuffixWasm(addr(0xff), fixture.signer.address.slice(-1), {
+    await mineMintSuffixWasm(fixture.signer.address.slice(-1), {
       masterSeed: new Uint8Array(32),
       startNonce: 3n,
       stride: 8n,
@@ -172,7 +168,7 @@ describe("Solana mint WASM adapter", () => {
     const controller = new AbortController();
     const progress: number[] = [];
     await expect(
-      mineMintSuffixWasm(addr(0xff), fixture.signer.address.slice(-1), {
+      mineMintSuffixWasm(fixture.signer.address.slice(-1), {
         masterSeed: new Uint8Array(32),
         chunkSize: 4,
         maxAttempts: 10,
@@ -188,7 +184,7 @@ describe("Solana mint WASM adapter", () => {
 
     const exhausted = await fixtureExports({ hitAfter: 100 });
     await expect(
-      mineMintSuffixWasm(addr(0xff), exhausted.signer.address.slice(-1), {
+      mineMintSuffixWasm(exhausted.signer.address.slice(-1), {
         masterSeed: new Uint8Array(32),
         chunkSize: 4,
         maxAttempts: 10,
@@ -202,7 +198,7 @@ describe("Solana mint WASM adapter", () => {
     const fixture = await fixtureExports();
     const controller = new AbortController();
     await expect(
-      mineMintSuffixWasm(addr(0xff), fixture.signer.address.slice(-1), {
+      mineMintSuffixWasm(fixture.signer.address.slice(-1), {
         masterSeed: new Uint8Array(32).fill(1),
         maxAttempts: 1,
         signal: controller.signal,
@@ -214,9 +210,9 @@ describe("Solana mint WASM adapter", () => {
 
   it("rejects a result whose public key does not match its seed", async () => {
     const fixture = await fixtureExports();
-    new Uint8Array(fixture.exports.memory.buffer, 128 + 32, 32).fill(0);
+    new Uint8Array(fixture.exports.memory.buffer, 64 + 32, 32).fill(0);
     await expect(
-      mineMintSuffixWasm(addr(0xff), fixture.signer.address.slice(-1), {
+      mineMintSuffixWasm(fixture.signer.address.slice(-1), {
         masterSeed: new Uint8Array(32),
         maxAttempts: 1,
         instantiate: async () => fixture.exports,

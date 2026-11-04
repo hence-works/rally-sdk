@@ -10,6 +10,7 @@ import {
   decodeReferral,
   fetchClusterTime,
   fetchLaunch,
+  fetchLaunchPriceWad,
   rallyPdas,
 } from "../../src/solana";
 import { CLOCK_SYSVAR_ADDRESS } from "../../src/solana";
@@ -116,6 +117,10 @@ describe("Raydium pool state", () => {
 });
 
 describe("fetch helpers", () => {
+  it("fetchLaunchPriceWad fails closed without both mints", async () => {
+    await expect(fetchLaunchPriceWad(fakeRpc({}), { pool: addr(1) } as never, 9)).rejects.toMatchObject({ code: "MISSING_ADDRESS" });
+  });
+
   it("fetchLaunch checks the owner program", async () => {
     const mint = addr(1);
     const at = await rallyPdas(RALLY_SOLANA_PROTOCOL_PROGRAM_ID).launch(mint);

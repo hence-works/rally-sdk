@@ -19,13 +19,22 @@ const Q128 = 1n << 128n;
 
 /**
  * Spot price of the launch token in quote, as a WAD (1e18 = one quote per token), from a
- * Raydium pool's `sqrtPriceX64`. token_0 is always the launch token (I-7) and token_1 the
- * quote, so `price = sqrtPriceX64^2 * scale / 2^128`. Integer math, rounded down.
+ * Raydium pool's `sqrtPriceX64`. When quote is token1, price is
+ * `sqrtPriceX64^2 * scale / 2^128`; when quote is token0 the pool ratio is reciprocal,
+ * so price is `2^128 * scale / sqrtPriceX64^2`. Integer math, rounded down.
  *
  * Unlike the EVM virtual curve, a Solana curve is real Raydium liquidity from the first
  * slot, so the pool's own price IS the spot price in every phase.
  */
-export function priceWadFromSqrtPriceX64(sqrtPriceX64: bigint, quoteDecimals: number): bigint {
+export function priceWadFromSqrtPriceX64(
+  sqrtPriceX64: bigint,
+  quoteDecimals: number,
+  quoteIsToken0: boolean = false,
+): bigint {
   if (sqrtPriceX64 < 0n) throw new RallyError("INVALID_AMOUNT", "sqrtPriceX64 must be non-negative");
+  if (quoteIsToken0) {
+    if (sqrtPriceX64 === 0n) throw new RallyError("INVALID_AMOUNT", "sqrtPriceX64 must be positive for a reciprocal price");
+    return (Q128 * priceScale(quoteDecimals)) / (sqrtPriceX64 * sqrtPriceX64);
+  }
   return (sqrtPriceX64 * sqrtPriceX64 * priceScale(quoteDecimals)) / Q128;
 }
