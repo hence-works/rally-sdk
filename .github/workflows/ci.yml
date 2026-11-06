@@ -1,3 +1,7 @@
+# Runners are Blacksmith's `blacksmith-4vcpu-ubuntu-2404`, not a GitHub-hosted label:
+# GitHub-hosted runner minutes are stopped for this organization, and such a job dies in
+# "Set up job" after a few seconds without reaching a step. See
+# hence-works/hence-infra `docs/ci-blacksmith-consolidation.md`.
 # CI for @rally-fun/sdk as a standalone repo.
 #
 # The SDK has no lockfile here: inside the monorepo its yarn.lock pins it. A standalone
@@ -21,7 +25,7 @@ concurrency:
 
 jobs:
   check:
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 20
     strategy:
       fail-fast: false
